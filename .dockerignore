@@ -1,0 +1,11 @@
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/.env
+**/*.db
+**/*.db-*
+Aquaculture_Webapp/backend/data/reports
+Aquaculture_Model/training
+Aquaculture_Model/tests
