@@ -22,6 +22,9 @@ INGEST_API_KEY = os.getenv("INGEST_API_KEY", "").strip()
 REPLAN_MODE = os.getenv("REPLAN_MODE", "gemini").strip().lower()         # gemini | onboard
 # Web origins allowed to call the API from another host (comma-separated). Empty = same origin only.
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+# Shared login for a public deployment (HTTP Basic auth). Empty password = no login (local use).
+APP_USERNAME = os.getenv("APP_USERNAME", "aquasentinel").strip()
+APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
 
 _model_dir = Path(os.getenv("MODEL_DIR", "../Aquaculture_Model"))
 MODEL_DIR = _model_dir if _model_dir.is_absolute() else (PROJECT_DIR / _model_dir).resolve()

@@ -99,7 +99,19 @@ for the real boat the Planner pushes waypoints, and the autopilot must implement
 
 ## Deploying
 
-One container serves both API and dashboard (build from the workspace root so the model is included):
+One container serves both API and dashboard. To build it on Cloud Build and deploy it to Cloud Run
+(from the workspace root; needs the gcloud CLI, logged in, and a project with billing):
+
+```bash
+./deploy.sh <gcp-project-id> [region]     # region defaults to asia-south1 (Mumbai)
+```
+
+It reads `GEMINI_API_KEY`, `GEMINI_MODEL` and `APP_PASSWORD` from `.env`. `APP_PASSWORD` puts a shared
+login (username `APP_USERNAME`, default `aquasentinel`) in front of the dashboard, API and WebSocket; the
+boat endpoints keep their own `X-API-Key` check when `INGEST_API_KEY` is set. The service scales to
+zero when idle, so data resets on the next start; `MIN_INSTANCES=1 ./deploy.sh ...` keeps it running.
+
+To build the image locally instead:
 
 ```bash
 docker build -f Aquaculture_Webapp/Dockerfile -t aquasentinel .
@@ -111,8 +123,8 @@ process memory and on local disk. Firebase Hosting can serve `frontend/dist` ins
 do not carry WebSockets, so the dashboard connects to Cloud Run directly.
 
 Not built yet from the deck's architecture: Pub/Sub, BigQuery, Firestore, Firebase Auth, and
-sending alerts by FCM or SMS. There is no login; `run.sh` binds to localhost for that reason.
-Add authentication before exposing the control endpoints on the internet.
+sending alerts by FCM or SMS. There are no user accounts: one shared password (`APP_PASSWORD`) guards a public deployment, and
+`run.sh` binds to localhost because the gate is off when no password is set.
 
 ## What is simulated
 

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import config, reports, runtime
+from .auth import PasswordGate
 from .hub import Hub, _short
 from .simulator import SCENARIOS
 
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AquaSentinel API", version="1.0.0", lifespan=lifespan)
 if config.ALLOWED_ORIGINS:
     app.add_middleware(CORSMiddleware, allow_origins=config.ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(PasswordGate)        # no-op unless APP_PASSWORD is set
 
 
 def _service():

@@ -1,0 +1,17 @@
+# Upload only what the Docker build needs (same exclusions as .dockerignore, plus local-only folders)
+.git
+.gitignore
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/.env
+**/*.db
+**/*.db-*
+**/.DS_Store
+Aquaculture_Webapp/backend/data/reports
+Aquaculture_Webapp/demo
+Aquaculture_Webapp/docs
+Aquaculture_Model/training
+Aquaculture_Model/tests

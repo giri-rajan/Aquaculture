@@ -1,0 +1,6 @@
+# Builds the AquaSentinel image on Cloud Build (from the workspace root, so the model is included).
+# Used by deploy.sh; run by hand with:  gcloud builds submit --config cloudbuild.yaml --substitutions _IMAGE=<image>
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "Aquaculture_Webapp/Dockerfile", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]
