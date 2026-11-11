@@ -1,6 +1,6 @@
 /** Turns structured data from the backend into text in the viewer's language. */
 import type { T, TMaybe } from './i18n'
-import type { Activity, Anomaly, Mission, MissionMeta, SourceInfo } from './types'
+import type { Activity, Anomaly, EdgeAlert, Mission, MissionMeta, SourceInfo } from './types'
 
 export const zoneName = (tm: TMaybe, id: string) => tm(`zone.${id}`, id)
 export const placeName = (tm: TMaybe, p: { id?: string | null; name?: string | null }) => tm(`place.${p.id}`, p.name ?? p.id ?? '')
@@ -11,6 +11,26 @@ export function sourceNote(t: T, tm: TMaybe, a: Pick<Anomaly, 'source_info' | 's
   const parts = [tm(`src.${i.reason}`, t('src.other')), t(i.snapped ? 'src.snapped' : 'src.open')]
   if (i.place_id && i.distance_m != null) parts.push(t('src.near', { d: i.distance_m, place: placeName(tm, { id: i.place_id, name: i.place }) }))
   return parts.join(' ')
+}
+
+/** The first alert as shown: the model's own words, or the fixed rule's wording in the viewer's language. */
+export function edgeText(t: T, tm: TMaybe, a: EdgeAlert): { title: string; body: string } {
+  if (a.by !== 'rule') return { title: a.title, body: a.body }
+  const zone = zoneName(tm, a.facts.zone)
+  return { title: t('edge.ruleTitle', { zone }), body: t('edge.ruleBody', { zone, params: a.facts.changes.map((c) => tm(`param.${c.param}`, c.label)).join(', ') }) }
+}
+
+const STATS = ['mean', 'std', 'min', 'max', 'delta', 'dev', 'ewm']
+/** A fish-health model feature (for example `turbidity_mean_6h`) as a label in the viewer's language.
+ *  Mirrors describe_feature() in Aquaculture_Model/app/explain.py; `fallback` is that function's English text. */
+export function factorName(tm: TMaybe, feature: string, fallback: string): string {
+  const special = tm(`fx.${feature}`, '')
+  if (special) return special
+  const parts = feature.split('_')
+  const s = tm(`fs.${parts[0]}`, '')
+  if (!s) return fallback
+  if (parts.length === 1) return tm('fp.current', fallback, { s })
+  return STATS.includes(parts[1]) ? tm(`fp.${parts[1]}`, fallback, { s, w: parts[parts.length - 1] }) : fallback
 }
 
 export function metaSummary(t: T, tm: TMaybe, meta: MissionMeta): string {

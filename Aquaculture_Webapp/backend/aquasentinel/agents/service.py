@@ -1,8 +1,9 @@
 """The Gemini agent layer, built with Google's Agent Development Kit (ADK).
 
 Four roles, as in the architecture: Planner, Visual Inspector, Diagnostician, Reporter.
-Every agent uses the single model named by GEMINI_MODEL in .env; no other model or provider is
-referenced anywhere in this app.
+Every agent here uses the single model named by GEMINI_MODEL in .env. Two optional features use
+their own model on the same key and live in their own modules: the first alert (edge.py, GEMMA_MODEL)
+and spoken conversation (voice.py, GEMINI_LIVE_MODEL).
 """
 from __future__ import annotations
 
@@ -77,6 +78,12 @@ class Alerts(BaseModel):
     english: Alert
     tamil: Alert
     hindi: Alert
+
+
+class FarmerBrief(BaseModel):
+    status_line: str = Field(description="One short sentence: is the water safe for the fish right now")
+    what_happened: str = Field(description="One or two short sentences on what the boat found, or that nothing unusual was found")
+    do_now: list[str] = Field(description="1 to 3 short actions the farmer can take themselves, most urgent first")
 
 
 # ----------------------------------------------------------------------------- agents
@@ -185,7 +192,24 @@ fishing, using it for cattle) and that the pollution control board has been info
 numbers except the place. Match the stated confidence: if it is low or medium, say the cause is suspected, not confirmed.
 The Tamil and Hindi versions must be natural translations in their own scripts, not transliterations.""")
 
+farmer_guide = LlmAgent(
+    name="reporter_farmer_brief", model=MODEL, output_schema=FarmerBrief,
+    description="Turns the zone's fish-health result and any diagnosis into plain advice for a fish farmer.",
+    instruction="""You write for a small fish farmer in India who keeps fish in, or draws water from, one zone of a lake.
+They read this on a phone and may have it read aloud. You are given the fish-health model's status for their zone
+(Healthy, Stressed or Critical), the model's own advice, and, when there is one, the latest pollution finding there.
+Write three things:
+- status_line: one short sentence that says whether the water is safe for the fish right now.
+- what_happened: one or two short sentences on what was found and where, or that nothing unusual was found.
+  If a cause is given with low or medium confidence, say it is suspected, not confirmed.
+- do_now: one to three actions the farmer can do themselves, most urgent first. Examples: run the aerators,
+  feed less or stop feeding, do not pump lake water into the ponds, watch for fish gasping at the surface,
+  call the fisheries officer. When the status is Healthy and nothing was found, give one routine step only.
+Use everyday words and short sentences. No numbers, no chemical names beyond "oxygen" and "ammonia", no jargon.
+Use only what you are given. Do not invent readings, places or causes.""")
+
 _runners: dict[str, InMemoryRunner] = {}
+_farmer_cache: dict[tuple, dict] = {}
 
 
 # ----------------------------------------------------------------------------- running an agent
@@ -350,6 +374,26 @@ async def write_alerts(anomaly: dict, diagnosis: dict) -> dict:
     out = parse_json(res["text"])
     out["model"] = MODEL
     return out
+
+
+async def farmer_brief(facts: dict, language: str = "en") -> dict:
+    """Plain-language brief for the farmer view. `facts` comes from Hub.farmer_facts(). The result is kept
+    until the zone's status, its anomaly or its diagnosis changes, so opening the page does not cost a call each time."""
+    key = (facts["zone"], facts.get("health_status"), (facts.get("anomaly") or {}).get("id"),
+           (facts.get("diagnosis") or {}).get("id"), language)
+    if key in _farmer_cache:
+        return _farmer_cache[key]
+    res = await run_agent(farmer_guide, "Write the brief for this zone.\n" + json.dumps(facts, default=str, ensure_ascii=False)
+                          + _in_language(language, structured=True))
+    out = parse_json(res["text"])
+    brief = {"status_line": str(out.get("status_line", "")).strip(), "what_happened": str(out.get("what_happened", "")).strip(),
+             "do_now": [str(x).strip() for x in (out.get("do_now") or []) if str(x).strip()][:3], "model": MODEL, "language": language}
+    if not brief["status_line"] or not brief["do_now"]:
+        raise ValueError("The model returned an incomplete brief")
+    if len(_farmer_cache) > 200:
+        _farmer_cache.clear()
+    _farmer_cache[key] = brief
+    return brief
 
 
 transcriber = LlmAgent(

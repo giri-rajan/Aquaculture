@@ -98,7 +98,7 @@ export function GeminiOff({ what }: { what: string }) {
 
 export function Card({ title, right, children, className = '' }: { title?: ReactNode; right?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`card p-3.5 sm:p-4 min-w-0 ${className}`}>
+    <section className={`card p-4 sm:p-5 min-w-0 ${className}`}>
       {(title || right) && (
         <header className="flex items-center justify-between gap-x-3 gap-y-2 mb-3 min-h-6 flex-wrap">
           <h2 className="card-title flex items-center gap-1.5 m-0">{title}</h2>
@@ -107,5 +107,35 @@ export function Card({ title, right, children, className = '' }: { title?: React
       )}
       {children}
     </section>
+  )
+}
+
+/** Placeholder block shown while data loads. */
+export function Skeleton({ className = 'h-4 w-full' }: { className?: string }) {
+  return <div className={`skeleton ${className}`} aria-hidden />
+}
+
+/** Friendly "nothing here yet" block: an icon, one line, and an optional hint. */
+export function EmptyState({ icon, title, hint }: { icon: ReactNode; title: string; hint?: string }) {
+  return (
+    <div className="flex flex-col items-center text-center gap-1.5 py-5 px-3">
+      <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-accent-soft text-accent">{icon}</span>
+      <p className="m-0 text-sm font-medium">{title}</p>
+      {hint && <p className="m-0 text-xs text-muted max-w-xs leading-relaxed">{hint}</p>}
+    </div>
+  )
+}
+
+/** One big number with a label above and a caption below. */
+export function Stat({ label, value, unit, caption }: { label: string; value: ReactNode; unit?: string; caption?: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="eyebrow">{label}</div>
+      <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
+        <span className="display text-3xl sm:text-4xl tnum">{value}</span>
+        {unit && <span className="text-sm text-muted">{unit}</span>}
+      </div>
+      {caption && <div className="mt-1 text-xs text-ink-2 leading-relaxed">{caption}</div>}
+    </div>
   )
 }
