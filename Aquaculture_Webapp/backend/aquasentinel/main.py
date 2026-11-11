@@ -453,10 +453,64 @@ def list_alerts():
     return {"alerts": hub.store.latest("alerts", 20)}
 
 
-# ----------------------------------------------------------------------------- benchmarks and agent status
+# ----------------------------------------------------------------------------- farmer view and spoken conversation
+LANGS = ("en", "ta", "hi")
+
+
+@app.get("/api/farmer")
+async def farmer(zone: str, lang: Optional[str] = None):
+    """Plain-language brief for one zone, for the farmer view. The status itself comes from the fish-health
+    model in the live state; Gemini only words it. Without Gemini, or when the call fails, `brief` is null
+    and the page shows the model's own advice."""
+    if zone not in {z["id"] for z in hub.lake.zones}:
+        raise HTTPException(404, "No such zone")
+    facts = hub.farmer_facts(zone)
+    language = lang if lang in LANGS else hub.language
+    brief, error = None, None
+    if config.GEMINI_READY and facts["available"]:
+        from .agents import service
+        try:
+            brief = await service.farmer_brief(facts, language)
+        except Exception as e:
+            logger.warning("Farmer brief for zone %s failed: %s", zone, _short(e))
+            error = _short(e)
+    return {"zone": zone, "language": language, "brief": brief, "error": error}
+
+
+@app.websocket("/ws/voice")
+async def voice_socket(ws: WebSocket, lang: str = "en"):
+    """Spoken conversation over the Gemini Live API. See agents/voice.py for the message format."""
+    await ws.accept()
+    try:
+        if not config.LIVE_READY:
+            await ws.send_json({"type": "error", "message": "Live voice is not configured. Set GEMINI_LIVE_MODEL in Aquaculture_Webapp/.env and restart."})
+            return
+        from .agents import voice
+        await voice.run_session(ws, lang if lang in LANGS else hub.language, hub.simulated)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.exception("Voice session failed")
+        try:
+            await ws.send_json({"type": "error", "message": f"Voice session failed: {_short(e)}"})
+        except Exception:
+            pass
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
+# ----------------------------------------------------------------------------- benchmarks, impact and agent status
 @app.get("/api/benchmarks")
 def benchmarks():
     return hub.benchmarks()
+
+
+@app.get("/api/impact")
+def impact():
+    return hub.impact()
 
 
 @app.post("/api/benchmarks/visual")

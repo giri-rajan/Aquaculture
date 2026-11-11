@@ -1,13 +1,13 @@
-import { Activity as ActivityIcon, Anchor, Bot, Camera, Crosshair, FlaskConical, Home, Navigation, Pause, Play, Radar, Route, Send, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Activity as ActivityIcon, AlertTriangle, Anchor, Bot, Camera, CircleCheck, Crosshair, FlaskConical, Home, Navigation, Pause, Play, Radar, Route, Send, Siren, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { api, apiUrl, clock, fmt } from '../api'
 import { LakeMap, RampLegend } from '../components/LakeMap'
 import { LineChart } from '../components/LineChart'
-import { Card, ErrorNote, GeminiOff, Spinner, StatusChip, ToolCalls, useAction } from '../components/ui'
+import { Card, EmptyState, ErrorNote, GeminiOff, Spinner, StatusChip, ToolCalls, useAction } from '../components/ui'
 import { VoiceButton } from '../components/VoiceButton'
 import { useI18n } from '../i18n'
 import { useLive, type Live as LiveState } from '../store'
-import { activityText, missionSummary, replanReason, sourceNote, zoneName } from '../text'
+import { activityText, edgeText, missionSummary, replanReason, sourceNote, zoneName } from '../text'
 import { PARAMS, type Anomaly, type Diagnosis, type ParamKey, type ToolCall, type VisualFinding } from '../types'
 
 const WINDOWS = [{ key: 'tele.w2', s: 120 }, { key: 'tele.w10', s: 600 }, { key: 'tele.w60', s: 3600 }] as const
@@ -40,8 +40,10 @@ export function Live({ dark }: { dark: boolean }) {
 
   return (
     <div className="grid gap-3 sm:gap-4 grid-cols-1 lg:grid-cols-12">
-      {/* KPI tiles */}
-      <div className="order-1 lg:col-span-12 grid gap-2.5 sm:gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+      {/* Deep teal band: the lake's state in one line, then the six live readings */}
+      <section className="band order-1 lg:col-span-12 rounded-2xl p-4 sm:p-5">
+        <LakeStatus live={live} />
+        <div className="mt-3.5 grid gap-2.5 sm:gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
         {PARAMS.map((p) => {
           const v = latest?.[p] ?? null, base = live.baseline[p]
           const delta = v != null && base != null ? v - base : null
@@ -50,7 +52,7 @@ export function Live({ dark }: { dark: boolean }) {
               className="card p-3 sm:p-3.5 text-left transition-colors hover:bg-surface-2 min-w-0" style={param === p ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}>
               <div className="eyebrow truncate">{label(p)}</div>
               <div className="mt-1 flex items-baseline gap-1">
-                <span className="text-xl sm:text-2xl font-semibold">{fmt(v, meta[p].digits)}</span>
+                <span className="display text-2xl sm:text-3xl tnum">{fmt(v, meta[p].digits)}</span>
                 <span className="text-xs text-muted">{meta[p].unit}</span>
               </div>
               <div className="mt-1.5 flex items-center justify-between gap-x-2 gap-y-1 flex-wrap">
@@ -60,11 +62,12 @@ export function Live({ dark }: { dark: boolean }) {
             </button>
           )
         })}
-      </div>
+        </div>
+      </section>
 
       <div className="contents lg:flex lg:flex-col lg:gap-4 lg:col-span-7 xl:col-span-8 lg:min-w-0 lg:order-2">
         <Card className="order-2" title={<><Radar size={15} className="shrink-0" /> {t('live.mapTitle', { param: label(param) })}</>} right={<BoatStatus live={live} />}>
-          <div className="h-[46vh] min-h-[280px] max-h-[560px] lg:h-[520px] rounded-xl overflow-hidden border border-line">
+          <div className="h-[50vh] min-h-[300px] max-h-[600px] lg:h-[580px] rounded-xl overflow-hidden border border-line">
             <LakeMap live={live} param={param} dark={dark} showTruth={showTruth} domain={domain} />
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -113,6 +116,48 @@ export function Live({ dark }: { dark: boolean }) {
   )
 }
 
+/** One line that says how the lake is right now: an open anomaly, a zone at risk, or all clear. */
+function LakeStatus({ live }: { live: LiveState }) {
+  const { t, tm } = useI18n()
+  const open = live.anomalies.filter((a) => a.status === 'open')
+  const zones = Object.values(live.zones.zones).filter((z) => z.available)
+  const risk = zones.find((z) => z.health_status === 'Critical') ?? zones.find((z) => z.health_status === 'Stressed')
+  const tracing = live.boat?.mode === 'trace'
+  const [Icon, color, text] = open.length || tracing
+    ? [Siren, 'var(--critical)', tracing ? t('live.stTracing', { zone: zoneName(tm, live.boat!.zone) }) : t('live.stAnomaly', { zone: zoneName(tm, open[0].zone) })] as const
+    : risk
+      ? [AlertTriangle, 'var(--warning)', t('live.stZone', { zone: zoneName(tm, risk.zone), s: tm(`health.${risk.health_status}`, risk.health_status) })] as const
+      : [CircleCheck, 'var(--cta)', t(zones.length ? 'live.stOk' : 'live.stWaiting')] as const
+  return (
+    <div className="flex items-center gap-3 flex-wrap" role="status">
+      <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full shrink-0 ${open.length ? 'flash' : ''}`} style={{ background: 'var(--surface-2)', color }}><Icon size={20} /></span>
+      <div className="min-w-0">
+        <div className="eyebrow">{live.lake.name}</div>
+        <div className="display text-lg sm:text-2xl">{text}</div>
+      </div>
+    </div>
+  )
+}
+
+/** The first alert, written the moment the anomaly opened, with who wrote it and how fast. */
+function FirstAlert({ anomaly }: { anomaly: Anomaly }) {
+  const { t, tm } = useI18n()
+  const a = anomaly.edge_alert
+  if (!a) return null
+  const { title, body } = edgeText(t, tm, a)
+  return (
+    <div className="rounded-xl border border-line p-3" style={{ borderLeft: '3px solid var(--serious)' }}>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="eyebrow inline-flex items-center gap-1.5"><Siren size={12} /> {t('edge.title')}</span>
+        <span className="chip tnum">{a.by === 'gemma' ? a.model : t('edge.rule')}{a.seconds != null && ` · ${t('edge.after', { n: a.seconds < 10 ? a.seconds.toFixed(1) : Math.round(a.seconds) })}`}</span>
+      </div>
+      <div className="mt-1.5 text-sm font-semibold">{title}</div>
+      <p className="m-0 mt-0.5 text-xs text-ink-2 leading-relaxed">{body}</p>
+      <p className="m-0 mt-1.5 text-[0.68rem] text-muted">{t(a.by === 'gemma' ? 'edge.noteGemma' : 'edge.noteRule')}</p>
+    </div>
+  )
+}
+
 const Legend = ({ swatch, children }: { swatch: React.ReactNode; children: React.ReactNode }) => <span className="inline-flex items-center gap-1.5">{swatch}{children}</span>
 interface CardProps { live: LiveState; className?: string }
 
@@ -140,8 +185,9 @@ function DiagnosisCard({ live, className }: CardProps) {
   const src = anomaly ? sourceNote(t, tm, anomaly) : ''
   return (
     <Card className={className} title={<><Sparkles size={15} className="shrink-0" /> {t('diag.title')}</>} right={live.config.gemini_ready ? <span className="chip">{live.config.gemini_model}</span> : undefined}>
-      {!anomaly ? <p className="text-sm text-ink-2 m-0">{t('diag.none')}</p> : (
+      {!anomaly ? <EmptyState icon={<CircleCheck size={18} />} title={t('diag.noneTitle')} hint={t('diag.none')} /> : (
         <div className="space-y-3">
+          <FirstAlert anomaly={anomaly} />
           <div>
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold">{t('diag.anomaly', { id: anomaly.id })} · {t('c.zone', { z: anomaly.zone })}</span>
@@ -369,7 +415,7 @@ function ActivityCard({ live, className }: CardProps) {
   const items = [...live.activity].reverse().slice(0, 30)
   return (
     <Card className={className} title={<><Anchor size={15} className="shrink-0" /> {t('act.title')}</>}>
-      {items.length === 0 ? <p className="text-sm text-ink-2 m-0">{t('act.empty')}</p> : (
+      {items.length === 0 ? <EmptyState icon={<Anchor size={18} />} title={t('act.empty')} /> : (
         <ol className="m-0 p-0 list-none space-y-2 max-h-80 overflow-y-auto pr-1">
           {items.map((e, i) => (
             <li key={`${e.ts}-${i}`} className="text-xs leading-snug">

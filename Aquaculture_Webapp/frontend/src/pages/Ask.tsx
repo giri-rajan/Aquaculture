@@ -4,12 +4,13 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
 import { Card, ErrorNote, GeminiOff, Spinner, ToolCalls } from '../components/ui'
+import { appendVoice, LiveVoice } from '../components/LiveVoice'
 import { VoiceButton } from '../components/VoiceButton'
 import { useI18n } from '../i18n'
 import { useLive } from '../store'
 import type { ToolCall } from '../types'
 
-interface Turn { role: 'user' | 'assistant'; text: string; tool_calls?: ToolCall[]; error?: boolean }
+interface Turn { role: 'user' | 'assistant'; text: string; tool_calls?: ToolCall[]; error?: boolean; voice?: boolean }
 const SUGGESTIONS = ['ask.s1', 'ask.s2', 'ask.s3', 'ask.s4', 'ask.s5'] as const
 
 export function Ask() {
@@ -63,6 +64,12 @@ export function Ask() {
           <VoiceButton value={text} onChange={setText} onError={setVoiceErr} geminiReady={ready} disabled={!ready || busy} />
           <button className="icon-btn btn-primary" disabled={!ready || busy || text.trim().length < 2} aria-label={t('ask.send')} title={t('ask.send')}><Send size={15} /></button>
         </form>
+        {live.config.live_model && (
+          <div className="mt-3 pt-3 border-t border-line flex items-center justify-between gap-x-3 gap-y-2 flex-wrap">
+            <span className="text-xs text-ink-2 min-w-0">{t('lv.intro')} <span className="chip">{live.config.live_model}</span></span>
+            <LiveVoice onError={setVoiceErr} onDelta={(role, frag) => setTurns((prev) => appendVoice(prev, role, frag))} />
+          </div>
+        )}
         <div className="mt-2"><ErrorNote>{voiceErr}</ErrorNote></div>
       </Card>
     </div>

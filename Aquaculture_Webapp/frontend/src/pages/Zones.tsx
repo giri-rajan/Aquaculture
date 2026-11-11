@@ -5,7 +5,7 @@ import { LineChart } from '../components/LineChart'
 import { Card, ErrorNote, HealthBadge, healthColor } from '../components/ui'
 import { useI18n } from '../i18n'
 import { useLive } from '../store'
-import { zoneName } from '../text'
+import { factorName, zoneName } from '../text'
 import type { ZonePrediction } from '../types'
 
 interface History {
@@ -70,7 +70,7 @@ export function Zones() {
                     <span className="text-xs text-ink-2 tnum">{t('z.confidence', { n: Math.round(p.confidence * 100) })}</span>
                   </div>
                   <ProbBar p={p.probabilities} />
-                  <div className="mt-2.5 text-xs text-ink-2 truncate" title={p.top_factors[0]?.description}>{t('z.mainFactor', { f: p.top_factors[0]?.description ?? '–' })}</div>
+                  <div className="mt-2.5 text-xs text-ink-2 truncate" title={p.top_factors[0]?.description}>{t('z.mainFactor', { f: p.top_factors[0] ? factorName(tm, p.top_factors[0].feature, p.top_factors[0].description) : '–' })}</div>
                 </>
               )}
             </button>
@@ -137,6 +137,7 @@ function ProbBar({ p }: { p: Record<string, number> }) {
 }
 
 function FactorBars({ p }: { p: ZonePrediction }) {
+  const { tm } = useI18n()
   const max = Math.max(...p.top_factors.map((f) => Math.abs(f.impact)), 1e-6)
   return (
     <div className="space-y-2">
@@ -144,7 +145,7 @@ function FactorBars({ p }: { p: ZonePrediction }) {
         const w = (Math.abs(f.impact) / max) * 50
         return (
           <div key={f.feature} title={`${f.feature}: impact ${f.impact}`}>
-            <div className="flex justify-between gap-2 text-xs"><span className="text-ink-2 truncate">{f.description}</span><span className="tnum text-ink shrink-0">{fmt(f.value, 2)}</span></div>
+            <div className="flex justify-between gap-2 text-xs"><span className="text-ink-2 truncate">{factorName(tm, f.feature, f.description)}</span><span className="tnum text-ink shrink-0">{fmt(f.value, 2)}</span></div>
             <div className="relative h-2.5 mt-0.5">
               <div className="absolute inset-y-0 left-1/2 w-px" style={{ background: 'var(--axis)' }} />
               <div className="absolute inset-y-0 rounded-sm" style={{ width: `${w}%`, left: f.impact >= 0 ? '50%' : `${50 - w}%`, background: f.impact >= 0 ? 'var(--series)' : 'var(--neg)' }} />

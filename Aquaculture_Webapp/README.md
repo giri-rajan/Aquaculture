@@ -15,6 +15,8 @@ Needs `uv` and Node.js. Add your Gemini key to `.env` (created on first run) and
 ```
 GEMINI_API_KEY=...            # https://aistudio.google.com/apikey
 GEMINI_MODEL=gemini-3.8-flash # every agent uses exactly this model
+GEMMA_MODEL=                  # optional: small model for the first alert, e.g. gemma-4-26b-a4b-it
+GEMINI_LIVE_MODEL=            # optional: Live model for spoken conversation, e.g. gemini-3.8-live
 ```
 
 Without a key the dashboard still runs: simulator, map, charts, anomaly detection, plume tracing,
@@ -35,7 +37,8 @@ Tests: `cd backend && .venv/bin/python -m pytest -q`
   the browser's speech recogniser in the selected language. Other browsers record a short clip that Gemini
   transcribes (`POST /api/transcribe`, needs the key). The microphone works only on https or localhost.
 - **Still English**: the PDF report (the PDF library cannot shape Tamil or Devanagari), the fish-health model's
-  factor names and advice (they come from `../Aquaculture_Model`), tool-call details and backend error messages.
+  advice on the Zone health page (it comes from `../Aquaculture_Model`; the farmer view rewords it in the chosen language),
+  tool-call details and backend error messages.
   A stored diagnosis stays in the language it was written in; use "Diagnose again" after switching.
 - **Phones and tablets**: one column with a bottom tab bar on phones, two columns from 1024 px. To open it on a
   device on the same Wi-Fi: `HOST=0.0.0.0 ./run.sh` (trusted networks only; there is no login).
@@ -57,16 +60,35 @@ The Tamil and Hindi interface text was machine-written. Have a native speaker re
 | `backend/data/cpcb_criteria.json` | CPCB Designated Best Use classes used for grounding |
 | `frontend/src/` | React dashboard (Vite, TypeScript, Tailwind, Leaflet) |
 
+## Views
+
+- **Officer** (default): Live mission, Zone health, Ask the Lake, Reports & alerts, Impact.
+- **Farmer** (header switch, `#farmer`, or `?view=farmer`): one zone on one phone screen. Status from the fish-health model, what happened, up to three
+  things to do now, a Listen button (the browser's own speech, shown only when it has a voice for the language) and Talk.
+  Gemini words the brief (`GET /api/farmer`); without Gemini the page shows the model's own advice.
+- **Impact**: response times measured in this run (detection to first alert, to source estimate, to diagnosis; `GET /api/impact`), readings per hour
+  against an assumed 20 manual samples a day, and a money calculator. Measured figures, assumptions and the scenario are labelled as such.
+  The demo boat runs faster than the real hull, so the lab comparison multiplies the measured time by the speed setting. Benchmarks sit below.
+
+The look follows `/DESIGN.md` at the workspace root; its tokens are mapped to CSS variables in `frontend/src/index.css`.
+
 ## Agents
 
-Built with Google's Agent Development Kit. All use `GEMINI_MODEL` from `.env`.
+Built with Google's Agent Development Kit. These use `GEMINI_MODEL` from `.env`.
 
 | Agent | Job | Can call |
 |---|---|---|
 | Planner | Request → waypoint route; decides how to react to an anomaly | lake map, transect builder, `push_waypoints`, `start_plume_trace` |
 | Visual inspector | Camera frame → bloom, foam, oil sheen, waste, outfall | image only |
 | Diagnostician | Sensors + image + CPCB + zone health → probable cause with evidence | stats, readings, baseline, CPCB, zone health |
-| Reporter | Ask the Lake answers, report narrative, alerts in English, Tamil, Hindi | stats, period comparison, anomalies, diagnoses, CPCB, zone health |
+| Reporter | Ask the Lake answers, report narrative, alerts in English, Tamil, Hindi, and the farmer brief | stats, period comparison, anomalies, diagnoses, CPCB, zone health |
+
+Two optional features use their own model on the same key:
+
+| Feature | Model | What it does |
+|---|---|---|
+| First alert (`agents/edge.py`) | `GEMMA_MODEL` | Two sentences for the people who use the water, written the moment an anomaly opens (about 2 to 5 s), before tracing and diagnosis. Plain prompt, no tools, so the same prompt can run on the boat. Today the call goes to the Gemini API; on-boat inference is not built. Without the setting, a fixed rule writes the alert and the dashboard says so. |
+| Live voice (`agents/voice.py`) | `GEMINI_LIVE_MODEL` | The Talk button in Ask the Lake and the farmer view: a spoken conversation over the Gemini Live API (`/ws/voice`), answered through the Reporter's read-only tools. Needs https or localhost for the microphone. Without the setting, the button is hidden. |
 
 Safeguards: routes are rejected unless every waypoint and leg is on navigable water; data tools are
 read-only with fixed query shapes; the simulator's hidden ground truth is never returned by a tool;

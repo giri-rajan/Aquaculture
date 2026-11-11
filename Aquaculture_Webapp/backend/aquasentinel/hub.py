@@ -95,6 +95,8 @@ class Hub:
             "config": {
                 "simulated": self.simulated, "gemini_ready": config.GEMINI_READY, "gemini_model": config.GEMINI_MODEL,
                 "replan_mode": self.replan_mode, "params": config.PARAM_META, "language": self.language,
+                "gemma_model": config.GEMMA_MODEL if config.GEMMA_READY else None,
+                "live_model": config.GEMINI_LIVE_MODEL if config.LIVE_READY else None,
                 "scenario_kinds": [{"kind": k, "label": v["label"], "default_place": v["place"]} for k, v in SCENARIOS.items()],
             },
             "boat": self.boat.state() if self.simulated else None,
@@ -194,11 +196,29 @@ class Hub:
                                        code="anomaly_linked", anomaly_id=aid, prev=prev["id"])
                     return
 
+        self.spawn(self._first_alert(aid))              # a new plume: say so at once, before tracing and diagnosis
         if self.simulated:
             await self._replan(aid)
         elif config.GEMINI_READY:
             await asyncio.sleep(8)                      # let a few more readings arrive before diagnosing
             await self._diagnose_quietly(aid)
+
+    async def _first_alert(self, aid: int) -> None:
+        """Two sentences for the people who use the water, from the small model (Gemma) or, without it, a fixed rule."""
+        from .agents import edge
+        row = self.store.get("anomalies", aid)
+        zone = self.zone_health.latest.get(row["zone"])
+        try:
+            alert = await edge.quick_alert(row, zone, self.language)
+        except Exception as e:
+            await self.log("edge", f"First alert for #{aid}: the small model failed ({_short(e)}); the onboard rule wrote it",
+                           "error", code="edge_failed", anomaly_id=aid, error=_short(e))
+            alert = edge.rule_alert(row, zone)
+        alert["seconds"] = round(max(0.0, alert["ts"] - row["started"]), 1)       # detection to first alert
+        self.store.update("anomalies", aid, edge_alert=alert)
+        await self.broadcast({"type": "anomaly", "anomaly": self.store.get("anomalies", aid)})
+        await self.log("edge", f"First alert for anomaly #{aid} written by " + (alert["model"] or "the onboard rule"),
+                       code="edge_alert_gemma" if alert["by"] == "gemma" else "edge_alert_rule", anomaly_id=aid, model=alert["model"])
 
     async def _replan(self, aid: int) -> None:
         """Decide how the boat reacts: the Planner agent (Gemini) or the fixed onboard rule."""
@@ -253,7 +273,7 @@ class Hub:
         if near and near[1] < 120:
             note += f" {near[1]:.0f} m from {near[0].name}."
         lat, lon = self.lake.to_ll(ex, ey)
-        info = {"reason": TRACE_REASON.get(reason, "other"), "snapped": snapped,
+        info = {"reason": TRACE_REASON.get(reason, "other"), "snapped": snapped, "ts": time.time(),
                 "place_id": near[0].id if near and near[1] < 120 else None,
                 "place": near[0].name if near and near[1] < 120 else None,
                 "distance_m": round(near[1]) if near and near[1] < 120 else None}
@@ -418,6 +438,53 @@ class Hub:
                                "truth_rule": "A reading is 'polluted' when the simulated plume shifts pH by 0.3, DO by 1 mg/L, "
                                              "temperature by 1 °C, conductivity by 100 µS/cm, nitrate by 3 mg/L or turbidity by 10 NTU."},
             "localisation": self.localisation,
+        }
+
+    # ------------------------------------------------------------------ impact and the farmer view
+    def impact(self) -> dict:
+        """Measured response times for each plume found since the last reset, for the Impact page.
+        Seconds are counted from the reading that opened the anomaly. Nothing here is estimated."""
+        first_diag: dict[int, float] = {}
+        for d in self.store.latest("diagnoses", 200):                 # newest first, so the last write per anomaly is its first diagnosis
+            first_diag[d["anomaly_id"]] = d["ts"]
+        events = []
+        for a in reversed(self.store.latest("anomalies", 50, since=self.started, ts_col="started")):
+            if a.get("status") == "linked":
+                continue
+            alert, src = a.get("edge_alert") or {}, a.get("source_info") or {}
+            since = lambda ts: None if ts is None else round(max(0.0, ts - a["started"]), 1)
+            events.append({"anomaly_id": a["id"], "zone": a["zone"], "started": a["started"],
+                           "first_alert_s": alert.get("seconds"), "first_alert_by": alert.get("by"),
+                           "source_s": since(src.get("ts")), "diagnosis_s": since(first_diag.get(a["id"]))})
+        b = self.benchmarks()
+
+        def median(key: str) -> float | None:
+            vs = sorted(e[key] for e in events if e[key] is not None)
+            return vs[len(vs) // 2] if vs else None
+
+        return {"simulated": self.simulated, "since": self.started, "readings": b["readings"], "readings_per_hour": b["readings_per_hour"],
+                "speed_scale": self.boat.speed_scale if self.simulated else 1, "events": events,
+                "median": {k: median(k) for k in ("first_alert_s", "source_s", "diagnosis_s")}}
+
+    def farmer_facts(self, zone: str) -> dict:
+        """What is known about one zone, for the farmer brief: the fish-health result and the latest plume found there."""
+        p = self.zone_health.latest.get(zone) or {}
+        ok = bool(p.get("available"))
+        recent = [a for a in self.store.latest("anomalies", 30, since=time.time() - 6 * 3600, ts_col="started")
+                  if a["zone"] == zone and a.get("status") != "linked"]
+        a = recent[0] if recent else None
+        d = a and next((x for x in self.store.latest("diagnoses", 50) if x["anomaly_id"] == a["id"]), None)
+        return {
+            "zone": zone, "available": ok, "data_is_simulated": self.simulated,
+            "health_status": p.get("health_status") if ok else None,
+            "model_confidence": p.get("confidence") if ok else None,
+            "model_advice": p.get("advice", []) if ok else [],
+            "main_factor": (p.get("top_factors") or [{}])[0].get("description") if ok else None,
+            "anomaly": a and {"id": a["id"], "sensors_off_normal": [config.PARAM_META[k]["label"] for k in a["params"]],
+                              "source_near": (a.get("source_info") or {}).get("place"),
+                              "first_alert": (a.get("edge_alert") or {}).get("body")},
+            "diagnosis": d and {"id": d["id"], "probable_cause": d["body"].get("probable_cause"), "confidence": d["body"].get("confidence"),
+                                "headline": d["body"].get("headline")},
         }
 
     async def reset(self) -> None:

@@ -16,6 +16,11 @@ load_dotenv(PROJECT_DIR / ".env")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
 GEMINI_READY = bool(GEMINI_API_KEY and GEMINI_MODEL)
+# Optional second and third models on the same key. Empty = that feature is off.
+GEMMA_MODEL = os.getenv("GEMMA_MODEL", "").strip()               # small model that writes the first alert
+GEMMA_READY = bool(GEMINI_API_KEY and GEMMA_MODEL)
+GEMINI_LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "").strip()   # Live API model for spoken conversation
+LIVE_READY = bool(GEMINI_API_KEY and GEMINI_LIVE_MODEL)
 
 DATA_SOURCE = os.getenv("DATA_SOURCE", "simulator").strip().lower()      # simulator | boat
 INGEST_API_KEY = os.getenv("INGEST_API_KEY", "").strip()

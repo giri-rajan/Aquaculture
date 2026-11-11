@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build AquaSentinel on Cloud Build and deploy it to Cloud Run (one instance, password-protected).
+# Build AquaSentinel on Cloud Build and deploy it to Cloud Run (one instance; password-protected if APP_PASSWORD is set).
 #
 #   ./deploy.sh <gcp-project-id> [region]
 #
-# Reads GEMINI_API_KEY, GEMINI_MODEL and APP_PASSWORD from Aquaculture_Webapp/.env. Needs the gcloud CLI,
+# Reads GEMINI_API_KEY, GEMINI_MODEL, GEMMA_MODEL, GEMINI_LIVE_MODEL and APP_PASSWORD from Aquaculture_Webapp/.env. Needs the gcloud CLI,
 # logged in (gcloud auth login), and a project with billing enabled.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -16,8 +16,10 @@ IMAGE="$REGION-docker.pkg.dev/$PROJECT/$REPO/$SERVICE:$(date +%Y%m%d-%H%M%S)"
 env_val() { grep -E "^$1=" Aquaculture_Webapp/.env 2>/dev/null | tail -1 | cut -d= -f2- || true; }
 GEMINI_API_KEY="$(env_val GEMINI_API_KEY)"
 GEMINI_MODEL="$(env_val GEMINI_MODEL)"
+GEMMA_MODEL="$(env_val GEMMA_MODEL)"              # optional: first alert
+GEMINI_LIVE_MODEL="$(env_val GEMINI_LIVE_MODEL)"  # optional: spoken conversation
 APP_PASSWORD="$(env_val APP_PASSWORD)"
-[ -n "$APP_PASSWORD" ] || { echo "Set APP_PASSWORD in Aquaculture_Webapp/.env first (the login for the public URL)."; exit 1; }
+[ -n "$APP_PASSWORD" ] || echo "Note: no APP_PASSWORD in .env - the public URL will be open to anyone (no login)."
 [ -n "$GEMINI_API_KEY" ] || echo "Note: no GEMINI_API_KEY in .env - the agents will be disabled online."
 
 gcloud config set project "$PROJECT" >/dev/null
@@ -29,9 +31,10 @@ gcloud builds submit --config cloudbuild.yaml --substitutions "_IMAGE=$IMAGE" .
 
 # Values go through a temp YAML file so special characters in keys and passwords survive
 ENVFILE="$(mktemp)"; trap 'rm -f "$ENVFILE"' EXIT
-GEMINI_API_KEY="$GEMINI_API_KEY" GEMINI_MODEL="$GEMINI_MODEL" APP_PASSWORD="$APP_PASSWORD" python3 - "$ENVFILE" <<'PY'
+GEMINI_API_KEY="$GEMINI_API_KEY" GEMINI_MODEL="$GEMINI_MODEL" GEMMA_MODEL="$GEMMA_MODEL" GEMINI_LIVE_MODEL="$GEMINI_LIVE_MODEL" \
+  APP_PASSWORD="$APP_PASSWORD" python3 - "$ENVFILE" <<'PY'
 import json, os, sys
-vals = {k: os.environ[k] for k in ("GEMINI_API_KEY", "GEMINI_MODEL", "APP_PASSWORD")}
+vals = {k: os.environ[k] for k in ("GEMINI_API_KEY", "GEMINI_MODEL", "GEMMA_MODEL", "GEMINI_LIVE_MODEL", "APP_PASSWORD")}
 vals.update(DATA_SOURCE="simulator", REPLAN_MODE="gemini")
 open(sys.argv[1], "w").write("".join(f"{k}: {json.dumps(v)}\n" for k, v in vals.items()))
 PY
@@ -46,4 +49,4 @@ gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" \
   --cpu 1 --memory 1Gi --timeout 3600 --session-affinity
 
 echo "Live at: $(gcloud run services describe "$SERVICE" --region "$REGION" --format 'value(status.url)')"
-echo "Login: user 'aquasentinel', password = APP_PASSWORD from Aquaculture_Webapp/.env"
+[ -z "$APP_PASSWORD" ] || echo "Login: user 'aquasentinel', password = APP_PASSWORD from Aquaculture_Webapp/.env"

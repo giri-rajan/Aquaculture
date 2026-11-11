@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS missions (
 CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY, ts REAL, title TEXT, ai INTEGER, markdown TEXT, pdf TEXT);
 CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY, ts REAL, anomaly_id INTEGER, body TEXT);
 """
-JSON_COLS = {"params", "peak", "baseline", "body", "waypoints", "replan", "source_info", "meta"}
+JSON_COLS = {"params", "peak", "baseline", "body", "waypoints", "replan", "source_info", "meta", "edge_alert"}
 TABLES = ("readings", "anomalies", "diagnoses", "missions", "reports", "alerts")
 READING_COLS = ("ts", "lat", "lon", "zone", "ph", "do", "temp", "ec", "nitrate", "turbidity",
                 "source", "mission_id", "flagged", "truth")
@@ -45,7 +45,7 @@ class Store:
         with self._lock:
             self._db.executescript(SCHEMA)
             # Columns added after the first release; ignored when they already exist
-            for table, col in (("anomalies", "source_info"), ("missions", "meta")):
+            for table, col in (("anomalies", "source_info"), ("missions", "meta"), ("anomalies", "edge_alert")):
                 try:
                     self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
                 except sqlite3.OperationalError:

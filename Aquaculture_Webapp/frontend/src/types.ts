@@ -15,12 +15,18 @@ export interface Boat {
 export interface ToolCall { name: string; args: Record<string, unknown>; result?: string }
 export interface MissionMeta { code: 'whole_lake' | 'zone' | 'dock'; zone?: string | null; spacing_m?: number }
 export interface Mission { id: number; ts: number; request: string; summary: string; planner: string; waypoints: [number, number][]; status: string; meta?: MissionMeta | null }
-export interface SourceInfo { reason: string; snapped: boolean; place_id: string | null; place: string | null; distance_m: number | null }
+export interface SourceInfo { reason: string; snapped: boolean; place_id: string | null; place: string | null; distance_m: number | null; ts?: number }
+/** First alert, written when the anomaly opens: by the small model (Gemma) or, without it, by a fixed rule. */
+export interface EdgeAlert {
+  by: 'gemma' | 'rule'; model: string | null; language: string; ts: number; seconds?: number; title: string; body: string
+  facts: { zone: string; fish_health: string | null; changes: { param: ParamKey; label: string; direction: 'up' | 'down' | null; limit: Status }[] }
+}
 export interface Anomaly {
   id: number; started: number; ended: number | null; zone: string; lat: number; lon: number
   params: ParamKey[]; peak: Partial<Record<ParamKey, number>>; baseline: Partial<Record<ParamKey, number>>
   status: string; linked_to: number | null; source_lat: number | null; source_lon: number | null; source_note: string | null
   source_info?: SourceInfo | null
+  edge_alert?: EdgeAlert | null
   replan: { by: string; action: string; reason: string; tool_calls?: ToolCall[] } | null
 }
 export interface VisualFinding { label: string; present: boolean; confidence: number; note: string }
@@ -54,6 +60,7 @@ export interface LakeInfo {
 export interface Scenario { id: number; kind: string; label: string; place: string; place_name: string; lat: number; lon: number; started: number }
 export interface Config {
   simulated: boolean; gemini_ready: boolean; gemini_model: string; replan_mode: string; language?: string
+  gemma_model?: string | null; live_model?: string | null
   params: Record<ParamKey, ParamMeta>; scenario_kinds: { kind: string; label: string; default_place: string }[]
 }
 export interface Snapshot {
