@@ -3,7 +3,6 @@ import math
 import time
 
 import pytest
-
 from aquasentinel import camera, cpcb
 from aquasentinel.anomaly import Detector
 from aquasentinel.geo import lake

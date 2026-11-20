@@ -34,6 +34,7 @@ function reduce(s: Live | null, m: Msg): Live | null {
     case 'boat':
       return { ...s, boat: m.boat, trace_path: m.trace_path ?? s.trace_path }
     case 'anomaly': {
+      if (!m.anomaly) return s            // the row was deleted by a reset while an agent was still working on it
       const rest = s.anomalies.filter((a) => a.id !== m.anomaly.id)
       return { ...s, anomalies: [m.anomaly, ...rest].sort((a, b) => b.id - a.id), trace_path: m.trace_path ?? s.trace_path }
     }

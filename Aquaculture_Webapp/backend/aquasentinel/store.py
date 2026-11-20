@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -36,7 +37,8 @@ READING_COLS = ("ts", "lat", "lon", "zone", "ph", "do", "temp", "ec", "nitrate",
 
 
 class Store:
-    def __init__(self, path: Path | str = config.DB_PATH):
+    def __init__(self, path: Path | str = config.DB_PATH, mirror=None):
+        self.mirror = mirror                    # cloud.CloudMirror or None
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False)
@@ -52,6 +54,32 @@ class Store:
                     pass
             self._db.execute("DELETE FROM readings WHERE ts < ?", (time.time() - 14 * 86400,))
             self._db.commit()
+        if mirror is not None:
+            self._restore()
+
+    def _restore(self) -> None:
+        """A new container starts with an empty database: bring the findings back from the cloud mirror."""
+        from .cloud import MIRRORED
+        for table in MIRRORED:
+            with self._lock:
+                empty = self._db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+            if not empty:
+                continue
+            rows = self.mirror.load(table)
+            for row in rows:
+                vals = [json.dumps(v) if k in JSON_COLS and not isinstance(v, (str, type(None))) else v for k, v in row.items()]
+                with self._lock:
+                    cols = {r[1] for r in self._db.execute(f"PRAGMA table_info({table})")}
+                    keep = [(k, v) for k, v in zip(row.keys(), vals) if k in cols]
+                    names = ",".join(f'"{k}"' for k, _ in keep)
+                    self._db.execute(f"INSERT OR REPLACE INTO {table} ({names}) VALUES ({','.join('?' * len(keep))})", [v for _, v in keep])
+                    self._db.commit()
+            if rows:
+                logging.getLogger(__name__).info("Restored %d %s from the cloud mirror", len(rows), table)
+
+    def _mirror(self, table: str, row_id: int) -> None:
+        if self.mirror is not None and table != "readings":
+            self.mirror.put(table, self.get(table, row_id))
 
     # ------------------------------------------------------------------ generic helpers
     def _rows(self, sql: str, args: tuple = ()) -> list[dict]:
@@ -76,7 +104,9 @@ class Store:
         with self._lock:
             cur = self._db.execute(f"INSERT INTO {table} ({names}) VALUES ({','.join('?' * len(cols))})", vals)
             self._db.commit()
-            return int(cur.lastrowid)
+            row_id = int(cur.lastrowid)
+        self._mirror(table, row_id)
+        return row_id
 
     def update(self, table: str, row_id: int, **cols) -> None:
         assert table in TABLES
@@ -85,6 +115,7 @@ class Store:
         with self._lock:
             self._db.execute(f"UPDATE {table} SET {sets} WHERE id=?", (*vals, row_id))
             self._db.commit()
+        self._mirror(table, row_id)
 
     def get(self, table: str, row_id: int) -> dict | None:
         assert table in TABLES
@@ -102,6 +133,8 @@ class Store:
             for t in TABLES:
                 self._db.execute(f"DELETE FROM {t}")
             self._db.commit()
+        if self.mirror is not None:
+            self.mirror.clear()
 
     # ------------------------------------------------------------------ readings
     def add_reading(self, r: dict) -> int:

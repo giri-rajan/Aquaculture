@@ -11,7 +11,7 @@ Steps
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
@@ -108,7 +108,7 @@ bundle = {
     "critical_weight": CRITICAL_WEIGHT,
     "model_name": "LightGBM gradient boosting on engineered time-window features",
     "version": "1.0.0",
-    "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
     "validation": validation,
     "top_features": (imp / imp.sum()).head(15).round(4).to_dict(),
     "notes": "Trained on simulated data (5 ponds, 90 days, tilapia/carp ranges). Retrain/fine-tune on real "

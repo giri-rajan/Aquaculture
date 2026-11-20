@@ -32,7 +32,8 @@ TRACE_REASON = {"passed the peak along the shoreline": "shore_peak", "signal sto
 
 class Hub:
     def __init__(self, db_path=None):
-        self.store = Store(db_path) if db_path else Store()
+        from .cloud import from_env
+        self.store = Store(db_path or config.DB_PATH, mirror=from_env())
         self.lake = lake
         self.detector = Detector()
         self.zone_health = ZoneHealth()
@@ -59,6 +60,9 @@ class Hub:
         self._zones_dirty = True
         self._tasks: set = set()
         self.started = time.time()
+        # Bumped on every reset. SQLite reuses row ids after a reset, so an agent call still running from
+        # before it must not write its result onto the new anomaly that got the same id.
+        self.generation = 0
 
     # ------------------------------------------------------------------ plumbing
     def spawn(self, coro) -> None:
@@ -208,12 +212,15 @@ class Hub:
         from .agents import edge
         row = self.store.get("anomalies", aid)
         zone = self.zone_health.latest.get(row["zone"])
+        gen = self.generation
         try:
             alert = await edge.quick_alert(row, zone, self.language)
         except Exception as e:
             await self.log("edge", f"First alert for #{aid}: the small model failed ({_short(e)}); the onboard rule wrote it",
                            "error", code="edge_failed", anomaly_id=aid, error=_short(e))
             alert = edge.rule_alert(row, zone)
+        if gen != self.generation:                       # the demo was reset while the model was writing
+            return
         alert["seconds"] = round(max(0.0, alert["ts"] - row["started"]), 1)       # detection to first alert
         self.store.update("anomalies", aid, edge_alert=alert)
         await self.broadcast({"type": "anomaly", "anomaly": self.store.get("anomalies", aid)})
@@ -223,11 +230,14 @@ class Hub:
     async def _replan(self, aid: int) -> None:
         """Decide how the boat reacts: the Planner agent (Gemini) or the fixed onboard rule."""
         row = self.store.get("anomalies", aid)
+        gen = self.generation
         if self.replan_mode == "gemini" and config.GEMINI_READY:
             try:
                 from .agents import service
                 await self.log("planner", f"Asking Gemini how to respond to anomaly #{aid}", code="planner_asking", anomaly_id=aid)
                 result = await service.replan(row, self.language)
+                if gen != self.generation:
+                    return
                 names = [c["name"] for c in result["tool_calls"]]
                 tracing = self.boat.trace is not None and self.boat.trace.anomaly_id == aid
                 action = "trace" if tracing else "route" if "push_waypoints" in names else "none"
@@ -239,6 +249,8 @@ class Hub:
                     self.spawn(self._diagnose_later(aid, 8))
                 return
             except Exception as e:
+                if gen != self.generation:
+                    return
                 await self.log("planner", f"Gemini re-plan failed ({_short(e)}); using the onboard rule", "error", code="replan_failed",
                                anomaly_id=aid, error=_short(e))
         started = self.boat.start_trace(row["params"], aid)
@@ -320,11 +332,17 @@ class Hub:
         frames = self.frames.get(aid, {})
         jpeg = frames.get("source") or frames.get("detect")
         await self.log("diagnostician", f"Diagnosing anomaly #{aid}", code="diag_start", anomaly_id=aid)
+        gen = self.generation
         try:
             body = await service.diagnose(row, jpeg, simulated_frame=self.simulated, language=self.language)
         except Exception as e:
+            if gen != self.generation:
+                return {}
             await self.log("diagnostician", f"Diagnosis of #{aid} failed: {_short(e)}", "error", code="diag_failed", anomaly_id=aid, error=_short(e))
             raise
+        if gen != self.generation:
+            logger.info("Dropped the diagnosis of anomaly %s: the demo was reset while it ran", aid)
+            return {}
         did = self.store.insert("diagnoses", anomaly_id=aid, ts=time.time(), body=body)
         diag = self.store.get("diagnoses", did)
         await self.broadcast({"type": "diagnosis", "diagnosis": diag})
@@ -348,6 +366,8 @@ class Hub:
         else:
             return
         self.frames.setdefault(aid, {})[slot] = jpeg
+        if self.store.mirror is not None:
+            self.store.mirror.put_blob(f"frames/{aid}-{slot}.jpg", jpeg, "image/jpeg")
         for old in sorted(self.frames)[:-40]:
             del self.frames[old]
 
@@ -452,7 +472,7 @@ class Hub:
             if a.get("status") == "linked":
                 continue
             alert, src = a.get("edge_alert") or {}, a.get("source_info") or {}
-            since = lambda ts: None if ts is None else round(max(0.0, ts - a["started"]), 1)
+            since = lambda ts, t0=a["started"]: None if ts is None else round(max(0.0, ts - t0), 1)
             events.append({"anomaly_id": a["id"], "zone": a["zone"], "started": a["started"],
                            "first_alert_s": alert.get("seconds"), "first_alert_by": alert.get("by"),
                            "source_s": since(src.get("ts")), "diagnosis_s": since(first_diag.get(a["id"]))})
@@ -476,6 +496,7 @@ class Hub:
         d = a and next((x for x in self.store.latest("diagnoses", 50) if x["anomaly_id"] == a["id"]), None)
         return {
             "zone": zone, "available": ok, "data_is_simulated": self.simulated,
+            "boat_measured": self.measured_water(zone),
             "health_status": p.get("health_status") if ok else None,
             "model_confidence": p.get("confidence") if ok else None,
             "model_advice": p.get("advice", []) if ok else [],
@@ -486,6 +507,27 @@ class Hub:
             "diagnosis": d and {"id": d["id"], "probable_cause": d["body"].get("probable_cause"), "confidence": d["body"].get("confidence"),
                                 "headline": d["body"].get("headline")},
         }
+
+    def measured_water(self, zone: str) -> dict | None:
+        """Oxygen and nitrate the boat measured in a zone over the last hour. The fish-health model cannot see
+        either (its sensors are temperature, TDS, turbidity and pH), so the farmer view adds them from the boat.
+        Oxygen bands follow common warm-water fish guidance: under 5 mg/L stresses fish, under 3 mg/L is dangerous,
+        over 12 mg/L by day usually means an algal bloom (and a crash before dawn). Nitrate is compared with the
+        lake's own usual level, not with a fixed limit."""
+        now = time.time()
+        rows = self.store.recent_readings(200, zone=zone, since=now - 3600)
+        do = [r["do"] for r in rows if r.get("do") is not None]
+        if len(do) < 3:
+            return None
+        mean_do = sum(do) / len(do)
+        oxygen = "very_low" if mean_do < 3 else "low" if mean_do < 5 else "very_high" if mean_do > 12 else "ok"
+        lake = sorted(r["nitrate"] for r in self.store.recent_readings(2000, since=now - 6 * 3600) if r.get("nitrate") is not None)
+        zn = [r["nitrate"] for r in rows if r.get("nitrate") is not None]
+        nitrate = None
+        if zn and lake:
+            usual, here = lake[len(lake) // 2], sum(zn) / len(zn)
+            nitrate = "raised" if here - usual >= 3 else "usual"
+        return {"oxygen": oxygen, "oxygen_mg_l": round(mean_do, 1), "nitrate": nitrate, "readings": len(do), "window_min": 60}
 
     async def reset(self) -> None:
         self.store.reset()
@@ -499,6 +541,7 @@ class Hub:
         self.process_ms.clear()
         self.open_anomaly_id, self.latest, self.mission = None, None, None
         self.started = time.time()
+        self.generation += 1
         if self.simulated:
             self.boat.__init__(self.lake, self.world)
             self.boat.score_fn = self.detector.score

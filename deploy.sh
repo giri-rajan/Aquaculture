@@ -5,6 +5,12 @@
 #
 # Reads GEMINI_API_KEY, GEMINI_MODEL, GEMMA_MODEL, GEMINI_LIVE_MODEL and APP_PASSWORD from Aquaculture_Webapp/.env. Needs the gcloud CLI,
 # logged in (gcloud auth login), and a project with billing enabled.
+#
+# Findings (anomalies, diagnoses, missions, reports, alerts) are kept in Firestore and camera frames and PDFs in a
+# Cloud Storage bucket, so they survive Cloud Run scaling to zero. CLOUD_PERSIST=0 ./deploy.sh ... turns that off.
+# VERTEX=1 ./deploy.sh ... runs the ADK agents on Vertex AI with the service account instead of the API key
+# (GEMINI_MODEL must then be a model id Vertex AI offers in us-central1). A VERTEX_API_KEY in .env does the same
+# with that key instead of the service account.
 set -euo pipefail
 cd "$(dirname "$0")"
 PROJECT="${1:?usage: ./deploy.sh <gcp-project-id> [region]}"
@@ -19,11 +25,24 @@ GEMINI_MODEL="$(env_val GEMINI_MODEL)"
 GEMMA_MODEL="$(env_val GEMMA_MODEL)"              # optional: first alert
 GEMINI_LIVE_MODEL="$(env_val GEMINI_LIVE_MODEL)"  # optional: spoken conversation
 APP_PASSWORD="$(env_val APP_PASSWORD)"
+VERTEX_API_KEY="$(env_val VERTEX_API_KEY)"        # optional: Vertex AI express key for the agents (billed to its project)
+[ -z "$VERTEX_API_KEY" ] || VERTEX=1
 [ -n "$APP_PASSWORD" ] || echo "Note: no APP_PASSWORD in .env - the public URL will be open to anyone (no login)."
 [ -n "$GEMINI_API_KEY" ] || echo "Note: no GEMINI_API_KEY in .env - the agents will be disabled online."
 
 gcloud config set project "$PROJECT" >/dev/null
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+PERSIST="${CLOUD_PERSIST:-1}"
+BUCKET=""
+if [ "$PERSIST" = 1 ]; then
+  gcloud services enable firestore.googleapis.com storage.googleapis.com
+  gcloud firestore databases describe --database='(default)' >/dev/null 2>&1 ||
+    gcloud firestore databases create --database='(default)' --location "$REGION" --type firestore-native
+  BUCKET="$PROJECT-aquasentinel"
+  gcloud storage buckets describe "gs://$BUCKET" >/dev/null 2>&1 ||
+    gcloud storage buckets create "gs://$BUCKET" --location "$REGION" --uniform-bucket-level-access
+fi
+[ "${VERTEX:-0}" != 1 ] || gcloud services enable aiplatform.googleapis.com
 gcloud artifacts repositories describe "$REPO" --location "$REGION" >/dev/null 2>&1 ||
   gcloud artifacts repositories create "$REPO" --repository-format docker --location "$REGION"
 
@@ -32,14 +51,17 @@ gcloud builds submit --config cloudbuild.yaml --substitutions "_IMAGE=$IMAGE" .
 # Values go through a temp YAML file so special characters in keys and passwords survive
 ENVFILE="$(mktemp)"; trap 'rm -f "$ENVFILE"' EXIT
 GEMINI_API_KEY="$GEMINI_API_KEY" GEMINI_MODEL="$GEMINI_MODEL" GEMMA_MODEL="$GEMMA_MODEL" GEMINI_LIVE_MODEL="$GEMINI_LIVE_MODEL" \
-  APP_PASSWORD="$APP_PASSWORD" python3 - "$ENVFILE" <<'PY'
+  APP_PASSWORD="$APP_PASSWORD" VERTEX_API_KEY="$VERTEX_API_KEY" PROJECT="$PROJECT" PERSIST="$PERSIST" BUCKET="$BUCKET" VERTEX="${VERTEX:-0}" python3 - "$ENVFILE" <<'PY'
 import json, os, sys
-vals = {k: os.environ[k] for k in ("GEMINI_API_KEY", "GEMINI_MODEL", "GEMMA_MODEL", "GEMINI_LIVE_MODEL", "APP_PASSWORD")}
-vals.update(DATA_SOURCE="simulator", REPLAN_MODE="gemini")
+vals = {k: os.environ[k] for k in ("GEMINI_API_KEY", "GEMINI_MODEL", "GEMMA_MODEL", "GEMINI_LIVE_MODEL", "APP_PASSWORD", "VERTEX_API_KEY")}
+vals.update(DATA_SOURCE="simulator", REPLAN_MODE="gemini", GOOGLE_CLOUD_PROJECT=os.environ["PROJECT"],
+            FIRESTORE_ENABLED="true" if os.environ["PERSIST"] == "1" else "false", GCS_BUCKET=os.environ["BUCKET"],
+            GOOGLE_GENAI_USE_VERTEXAI="true" if os.environ["VERTEX"] == "1" else "false")
 open(sys.argv[1], "w").write("".join(f"{k}: {json.dumps(v)}\n" for k, v in vals.items()))
 PY
 # At most one instance: the simulator, WebSocket clients and SQLite live in this one process.
-# It scales to zero when nobody is connected (costs ~nothing; data resets on the next start).
+# It scales to zero when nobody is connected (costs ~nothing). Findings come back from Firestore on the next start;
+# the raw readings and the simulator's live state start fresh.
 # To keep it running and keep its data while idle (~USD 40-50/month): MIN_INSTANCES=1 ./deploy.sh ...
 MIN="${MIN_INSTANCES:-0}"
 THROTTLE=$([ "$MIN" -gt 0 ] && echo --no-cpu-throttling || echo --cpu-throttling)

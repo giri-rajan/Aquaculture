@@ -6,6 +6,7 @@ Docs: http://localhost:8080/docs
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -64,7 +65,7 @@ async def _agent_call(coro):
         return await coro
     except HTTPException:
         raise
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise HTTPException(504, "Gemini did not answer in time")
     except Exception as e:
         logger.exception("Agent call failed")
@@ -150,6 +151,7 @@ async def _read_image(file: UploadFile) -> bytes:
     if len(data) > 5_000_000:
         raise HTTPException(413, "Image is larger than 5 MB")
     import io
+
     from PIL import Image
     try:
         im = Image.open(io.BytesIO(data))
@@ -178,6 +180,8 @@ def camera_latest():
 @app.get("/api/anomalies/{aid}/frame/{slot}.jpg")
 def anomaly_frame(aid: int, slot: str):
     jpeg = hub.frames.get(aid, {}).get(slot)
+    if jpeg is None and hub.store.mirror is not None and slot in ("detect", "source"):
+        jpeg = hub.store.mirror.get_blob(f"frames/{aid}-{slot}.jpg")      # a frame from before the container restarted
     if jpeg is None:
         raise HTTPException(404, "No frame stored for this anomaly")
     return Response(jpeg, media_type="image/jpeg")
@@ -408,6 +412,8 @@ async def create_report(body: ReportIn):
     config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     name = f"report-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}.pdf"
     await asyncio.to_thread(reports.build_pdf, config.REPORTS_DIR / name, data, narrative, config.GEMINI_MODEL)
+    if hub.store.mirror is not None:
+        hub.store.mirror.put_blob(f"reports/{name}", (config.REPORTS_DIR / name).read_bytes(), "application/pdf")
     rid = hub.store.insert("reports", ts=time.time(), title=f"{hub.lake.name}: last {body.hours:g} h", ai=int(bool(narrative)),
                            markdown=narrative, pdf=name)
     await hub.log("reporter", f"Report #{rid} ready" + ("" if narrative else " (data tables only, no Gemini narrative)"),
@@ -424,6 +430,11 @@ def list_reports():
 def report_pdf(rid: int):
     row = hub.store.get("reports", rid)
     path = row and (config.REPORTS_DIR / row["pdf"]).resolve()
+    if row and not path.exists() and hub.store.mirror is not None and config.REPORTS_DIR.resolve() in path.parents:
+        pdf = hub.store.mirror.get_blob(f"reports/{row['pdf']}")             # made before the container restarted
+        if pdf:
+            config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(pdf)
     if not row or config.REPORTS_DIR.resolve() not in path.parents or not path.exists():
         raise HTTPException(404, "Report not found")
     return FileResponse(path, media_type="application/pdf", filename=f"aquasentinel-report-{rid}.pdf")
@@ -474,7 +485,7 @@ async def farmer(zone: str, lang: Optional[str] = None):
         except Exception as e:
             logger.warning("Farmer brief for zone %s failed: %s", zone, _short(e))
             error = _short(e)
-    return {"zone": zone, "language": language, "brief": brief, "error": error}
+    return {"zone": zone, "language": language, "brief": brief, "error": error, "measured": facts["boat_measured"]}
 
 
 @app.websocket("/ws/voice")
@@ -506,6 +517,15 @@ async def voice_socket(ws: WebSocket, lang: str = "en"):
 @app.get("/api/benchmarks")
 def benchmarks():
     return hub.benchmarks()
+
+
+@app.get("/api/benchmarks/recorded")
+def recorded_benchmarks():
+    """The last run saved by scripts/run_benchmarks.py, so the figures quoted elsewhere can be checked."""
+    path = config.DATA_DIR / "benchmarks" / "latest.json"
+    if not path.exists():
+        raise HTTPException(404, "No recorded benchmark run. Run: cd backend && .venv/bin/python scripts/run_benchmarks.py")
+    return json.loads(path.read_text())
 
 
 @app.get("/api/impact")
@@ -540,8 +560,10 @@ async def visual_benchmark():
 
 @app.get("/api/agents/status")
 def agents_status():
-    return {"configured": config.GEMINI_READY, "model": config.GEMINI_MODEL or None,
-            "key_present": bool(config.GEMINI_API_KEY), "replan_mode": hub.replan_mode}
+    return {"configured": config.GEMINI_READY, "model": config.GEMINI_MODEL or None, "backend": config.GEMINI_BACKEND,
+            "key_present": bool(config.GEMINI_API_KEY), "replan_mode": hub.replan_mode,
+            "gemma_model": config.GEMMA_MODEL if config.GEMMA_READY else None,
+            "live_model": config.GEMINI_LIVE_MODEL if config.LIVE_READY else None}
 
 
 @app.post("/api/agents/test")

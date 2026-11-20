@@ -20,6 +20,8 @@ COPY Aquaculture_Model/app Aquaculture_Model/app
 COPY Aquaculture_Model/models Aquaculture_Model/models
 COPY Aquaculture_Webapp/backend/aquasentinel Aquaculture_Webapp/backend/aquasentinel
 COPY Aquaculture_Webapp/backend/data/lake.geojson Aquaculture_Webapp/backend/data/cpcb_criteria.json Aquaculture_Webapp/backend/data/
+# The last recorded benchmark run, shown on the Benchmarks page (scripts/run_benchmarks.py)
+COPY Aquaculture_Webapp/backend/data/benchmarks/latest.json Aquaculture_Webapp/backend/data/benchmarks/
 COPY --from=web /web/dist Aquaculture_Webapp/frontend/dist
 
 WORKDIR /srv/Aquaculture_Webapp/backend

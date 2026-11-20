@@ -45,7 +45,7 @@ class ZoneHealth:
             # The model service warns at import about its own HTTP settings (API key, CORS). Its HTTP
             # layer is not used here, so those warnings would only mislead.
             logging.getLogger("app.main").setLevel(logging.ERROR)
-            from app import main as model_api                   # loads the joblib bundle once
+            from app import main as model_api  # loads the joblib bundle once
             self._api = model_api
             logging.getLogger("app.main").setLevel(logging.WARNING)      # one INFO line per prediction is too noisy here
             self.model_info = {"name": model_api.bundle.get("model_name"), "version": model_api.app.version,

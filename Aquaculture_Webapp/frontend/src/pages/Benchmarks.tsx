@@ -1,4 +1,4 @@
-import { Gauge, RefreshCw } from 'lucide-react'
+import { ClipboardCheck, Gauge, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { Card, ErrorNote, Spinner, useAction } from '../components/ui'
@@ -12,6 +12,13 @@ interface Bench {
   localisation: { anomaly_id: number; scenario: string; error_m: number }[]
 }
 interface Visual { frames: { frame: number; scenario: string; drawn?: string[]; reported?: string[]; labels_correct?: number; labels_total?: number; error?: string }[]; label_accuracy: number | null; model: string }
+interface Recorded {
+  recorded_at: string; speed: number; gemini_model: string | null
+  summary: { detection_precision: number | null; detection_recall: number | null; source_error_m_median: number | null
+    source_error_m_max: number | null; scenarios_traced: string; visual_label_accuracy: number | null }
+  runs: { scenario: string; traced: boolean; source_error_m: number | null; latency_ms: { p50: number | null; p95: number | null }
+    detector: { precision: number | null; recall: number | null } | null }[]
+}
 type Verdict = 'met' | 'not met' | 'no data' | 'not measurable here'
 interface Row { metric: string; how: string; target: string; result: string; verdict: Verdict }
 
@@ -92,6 +99,8 @@ export function Benchmarks() {
         <ErrorNote>{err}</ErrorNote>
       </Card>
 
+      <RecordedRun />
+
       <Card title={t('b.vTitle')}>
         <p className="text-xs text-ink-2 m-0 mb-2.5">{t('b.vIntro')}</p>
         <button className="btn" disabled={!live.config.gemini_ready || !b.simulated || runVisual.busy} onClick={() => runVisual.run()}>{runVisual.busy ? <Spinner /> : null} {t('b.vRun')}</button>
@@ -122,4 +131,41 @@ function VerdictChip({ v }: { v: Verdict }) {
   const { t } = useI18n()
   const c = v === 'met' ? 'var(--good)' : v === 'not met' ? 'var(--critical)' : 'var(--axis)'
   return <span className="chip shrink-0"><i className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: c }} />{v === 'met' ? '✓ ' : v === 'not met' ? '✕ ' : ''}{t(`v.${v}`)}</span>
+}
+
+/** The last run saved by scripts/run_benchmarks.py: the source of the figures quoted in the pitch. */
+function RecordedRun() {
+  const { t, tm } = useI18n()
+  const [rec, setRec] = useState<Recorded | null | undefined>(undefined)
+  useEffect(() => { api<Recorded>('/benchmarks/recorded').then(setRec).catch(() => setRec(null)) }, [])
+  if (rec === undefined) return null
+  const s = rec?.summary
+  return (
+    <Card title={<><ClipboardCheck size={15} className="shrink-0" /> {t('rec.title')}</>}>
+      {!rec || !s ? <p className="text-xs text-ink-2 m-0">{t('rec.none')}</p> : <>
+        <p className="text-xs text-ink-2 m-0">{t('rec.intro', { when: rec.recorded_at, n: rec.runs.length, speed: rec.speed, model: rec.gemini_model ?? '–' })}</p>
+        <p className="text-sm m-0 mt-2 font-semibold">{t('rec.sum', { traced: s.scenarios_traced, med: s.source_error_m_median, max: s.source_error_m_max,
+          p: pct(s.detection_precision), r: pct(s.detection_recall), v: pct(s.visual_label_accuracy) })}</p>
+        <div className="overflow-x-auto mt-2">
+          <table className="w-full text-xs border-collapse tnum">
+            <caption className="sr-only">{t('rec.title')}</caption>
+            <thead><tr className="text-left eyebrow">{[t('rec.sc'), t('rec.traced'), t('rec.err'), t('rec.lat'), t('rec.p'), t('rec.r')].map((h) =>
+              <th key={h} scope="col" className="py-1.5 pr-3 font-semibold border-b border-line">{h}</th>)}</tr></thead>
+            <tbody>
+              {rec.runs.map((r) => (
+                <tr key={r.scenario}>
+                  <th scope="row" className="py-1.5 pr-3 text-left font-semibold border-b border-line">{tm(`sc.${r.scenario}`, r.scenario)}</th>
+                  <td className="py-1.5 pr-3 border-b border-line">{t(r.traced ? 'rec.yes' : 'rec.no')}</td>
+                  <td className="py-1.5 pr-3 border-b border-line">{r.source_error_m == null ? '–' : `${r.source_error_m} m`}</td>
+                  <td className="py-1.5 pr-3 border-b border-line">{r.latency_ms.p50 ?? '–'} / {r.latency_ms.p95 ?? '–'} ms</td>
+                  <td className="py-1.5 pr-3 border-b border-line">{pct(r.detector?.precision)}</td>
+                  <td className="py-1.5 border-b border-line">{pct(r.detector?.recall)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>}
+    </Card>
+  )
 }

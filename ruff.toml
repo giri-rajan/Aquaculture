@@ -1,0 +1,18 @@
+# Lint for both Python packages (Aquaculture_Webapp/backend and Aquaculture_Model). Run: uvx ruff check .
+target-version = "py312"
+line-length = 160
+extend-exclude = ["graphify-out", "**/.venv", "**/node_modules"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "B008",   # FastAPI declares File(...), Header(...) as defaults by design
+    "B904",   # HTTPException raised inside except is the intended API error, not a lost cause
+    "B905",   # zip() over equal-length arrays; strict= adds noise without catching anything here
+    "E731",   # short named lambdas are used deliberately as local helpers
+    "E702",
+    "UP045",  # Optional[X] is kept in FastAPI signatures for readability
+]
+
+[lint.per-file-ignores]
+"Aquaculture_Model/training/**" = ["E501"]

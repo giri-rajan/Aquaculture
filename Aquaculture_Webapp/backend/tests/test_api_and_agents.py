@@ -3,13 +3,12 @@ import asyncio
 import json
 
 import pytest
+from aquasentinel import config, main, runtime
+from aquasentinel.agents import service, tools
 from fastapi.testclient import TestClient
 from google.adk.agents import LlmAgent
 from google.adk.models import BaseLlm, LlmResponse
 from google.genai import types
-
-from aquasentinel import config, main, runtime
-from aquasentinel.agents import service, tools
 
 
 @pytest.fixture(scope="module")
@@ -113,3 +112,20 @@ def test_parse_json_rejects_prose():
 def test_agents_use_only_the_env_model():
     for a in (service.planner, service.visual_inspector, service.diagnostician, service.ask_the_lake, service.report_writer, service.alert_writer):
         assert a.model == config.GEMINI_MODEL
+
+
+def test_web_search_failure_does_not_break_ask_the_lake(monkeypatch):
+    """No Google Search quota (a 429) must leave Ask the Lake answering from the lake data, not fail the whole answer."""
+    import asyncio
+
+    from aquasentinel import config
+    from aquasentinel.agents import service
+
+    async def no_quota(*a, **k):
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    monkeypatch.setattr(config, "GROUNDING", True)
+    monkeypatch.setattr(service, "run_agent", no_quota)
+    out = asyncio.run(service.search_the_web("CPCB DO limit for fish culture"))
+    assert "error" in out and "lake data" in out["error"]
+    assert service.search_the_web in service.ask_the_lake.tools

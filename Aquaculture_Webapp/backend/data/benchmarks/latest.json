@@ -1,0 +1,301 @@
+{
+  "recorded_at": "2026-11-20 13:23:28 +0530",
+  "server": "http://127.0.0.1:8080",
+  "speed": 16,
+  "gemini_model": "gemini-3.5-flash-lite",
+  "host": "macOS-27.0.1-arm64-arm-64bit",
+  "simulated": true,
+  "summary": {
+    "latency_p95_ms_worst": 13.4,
+    "detection_precision": 1.0,
+    "detection_recall": 0.672,
+    "source_error_m_median": 6.0,
+    "source_error_m_max": 9.5,
+    "scenarios_traced": "4/4",
+    "visual_label_accuracy": 0.975,
+    "readings_per_hour": 3366
+  },
+  "runs": [
+    {
+      "scenario": "sewage",
+      "traced": true,
+      "source_error_m": 4.2,
+      "wall_seconds": 132,
+      "latency_ms": {
+        "n": 124,
+        "p50": 6.6,
+        "p95": 12.8
+      },
+      "detector": {
+        "tp": 44,
+        "fp": 0,
+        "fn": 27,
+        "tn": 54,
+        "n": 125,
+        "precision": 1.0,
+        "recall": 0.62,
+        "truth_rule": "A reading is 'polluted' when the simulated plume shifts pH by 0.3, DO by 1 mg/L, temperature by 1 °C, conductivity by 100 µS/cm, nitrate by 3 mg/L or turbidity by 10 NTU."
+      },
+      "process_ms": {
+        "p50": 4.34,
+        "p95": 8.65
+      },
+      "readings_per_hour": 3415,
+      "impact": {
+        "median": {
+          "first_alert_s": 2.9,
+          "source_s": 32.2,
+          "diagnosis_s": null
+        },
+        "events": [
+          {
+            "anomaly_id": 1,
+            "zone": "SW",
+            "started": 1795160764.4525409,
+            "first_alert_s": 2.9,
+            "first_alert_by": "rule",
+            "source_s": 32.2,
+            "diagnosis_s": null
+          }
+        ],
+        "speed_scale": 16.0
+      }
+    },
+    {
+      "scenario": "farm_runoff",
+      "traced": true,
+      "source_error_m": 9.5,
+      "wall_seconds": 99,
+      "latency_ms": {
+        "n": 91,
+        "p50": 5.5,
+        "p95": 13.4
+      },
+      "detector": {
+        "tp": 41,
+        "fp": 0,
+        "fn": 10,
+        "tn": 41,
+        "n": 92,
+        "precision": 1.0,
+        "recall": 0.804,
+        "truth_rule": "A reading is 'polluted' when the simulated plume shifts pH by 0.3, DO by 1 mg/L, temperature by 1 °C, conductivity by 100 µS/cm, nitrate by 3 mg/L or turbidity by 10 NTU."
+      },
+      "process_ms": {
+        "p50": 3.65,
+        "p95": 9.2
+      },
+      "readings_per_hour": 3359,
+      "impact": {
+        "median": {
+          "first_alert_s": null,
+          "source_s": 27.6,
+          "diagnosis_s": 0.0
+        },
+        "events": [
+          {
+            "anomaly_id": 1,
+            "zone": "SE",
+            "started": 1795160867.4417121,
+            "first_alert_s": null,
+            "first_alert_by": null,
+            "source_s": 27.6,
+            "diagnosis_s": 0.0
+          }
+        ],
+        "speed_scale": 16.0
+      }
+    },
+    {
+      "scenario": "industrial",
+      "traced": true,
+      "source_error_m": 6.5,
+      "wall_seconds": 123,
+      "latency_ms": {
+        "n": 115,
+        "p50": 5.7,
+        "p95": 10.9
+      },
+      "detector": {
+        "tp": 45,
+        "fp": 0,
+        "fn": 35,
+        "tn": 35,
+        "n": 115,
+        "precision": 1.0,
+        "recall": 0.562,
+        "truth_rule": "A reading is 'polluted' when the simulated plume shifts pH by 0.3, DO by 1 mg/L, temperature by 1 °C, conductivity by 100 µS/cm, nitrate by 3 mg/L or turbidity by 10 NTU."
+      },
+      "process_ms": {
+        "p50": 3.61,
+        "p95": 6.89
+      },
+      "readings_per_hour": 3373,
+      "impact": {
+        "median": {
+          "first_alert_s": null,
+          "source_s": 32.6,
+          "diagnosis_s": null
+        },
+        "events": [
+          {
+            "anomaly_id": 1,
+            "zone": "SW",
+            "started": 1795160984.447941,
+            "first_alert_s": null,
+            "first_alert_by": null,
+            "source_s": 32.6,
+            "diagnosis_s": null
+          }
+        ],
+        "speed_scale": 16.0
+      }
+    },
+    {
+      "scenario": "algal_bloom",
+      "traced": true,
+      "source_error_m": 5.6,
+      "wall_seconds": 77,
+      "latency_ms": {
+        "n": 71,
+        "p50": 4.9,
+        "p95": 7.3
+      },
+      "detector": {
+        "tp": 32,
+        "fp": 0,
+        "fn": 7,
+        "tn": 32,
+        "n": 71,
+        "precision": 1.0,
+        "recall": 0.821,
+        "truth_rule": "A reading is 'polluted' when the simulated plume shifts pH by 0.3, DO by 1 mg/L, temperature by 1 °C, conductivity by 100 µS/cm, nitrate by 3 mg/L or turbidity by 10 NTU."
+      },
+      "process_ms": {
+        "p50": 3.65,
+        "p95": 5.04
+      },
+      "readings_per_hour": 3311,
+      "impact": {
+        "median": {
+          "first_alert_s": 98.6,
+          "source_s": 19.8,
+          "diagnosis_s": 0.0
+        },
+        "events": [
+          {
+            "anomaly_id": 1,
+            "zone": "SE",
+            "started": 1795161076.155242,
+            "first_alert_s": 98.6,
+            "first_alert_by": "gemma",
+            "source_s": 19.8,
+            "diagnosis_s": 0.0
+          }
+        ],
+        "speed_scale": 16.0
+      }
+    }
+  ],
+  "visual": {
+    "frames": [
+      {
+        "frame": 1,
+        "scenario": "sewage",
+        "drawn": [
+          "foam",
+          "floating_waste",
+          "outfall_pipe"
+        ],
+        "reported": [
+          "floating_waste",
+          "foam",
+          "outfall_pipe"
+        ],
+        "labels_correct": 5,
+        "labels_total": 5
+      },
+      {
+        "frame": 2,
+        "scenario": "sewage",
+        "drawn": [
+          "foam",
+          "floating_waste"
+        ],
+        "reported": [
+          "floating_waste",
+          "foam"
+        ],
+        "labels_correct": 5,
+        "labels_total": 5
+      },
+      {
+        "frame": 3,
+        "scenario": "industrial",
+        "drawn": [
+          "oil_sheen",
+          "outfall_pipe"
+        ],
+        "reported": [
+          "oil_sheen",
+          "outfall_pipe"
+        ],
+        "labels_correct": 5,
+        "labels_total": 5
+      },
+      {
+        "frame": 4,
+        "scenario": "industrial",
+        "drawn": [
+          "oil_sheen"
+        ],
+        "reported": [
+          "oil_sheen"
+        ],
+        "labels_correct": 5,
+        "labels_total": 5
+      },
+      {
+        "frame": 5,
+        "scenario": "algal_bloom",
+        "drawn": [
+          "algal_bloom"
+        ],
+        "reported": [
+          "algal_bloom"
+        ],
+        "labels_correct": 5,
+        "labels_total": 5
+      },
+      {
+        "frame": 6,
+        "scenario": "farm_runoff",
+        "drawn": [
+          "algal_bloom"
+        ],
+        "reported": [],
+        "labels_correct": 4,
+        "labels_total": 5
+      },
+      {
+        "frame": 7,
+        "scenario": "clean water",
+        "drawn": [],
+        "reported": [],
+        "labels_correct": 5,
+        "labels_total": 5
+      },
+      {
+        "frame": 8,
+        "scenario": "clean water",
+        "drawn": [],
+        "reported": [],
+        "labels_correct": 5,
+        "labels_total": 5
+      }
+    ],
+    "label_accuracy": 0.975,
+    "model": "gemini-3.5-flash-lite",
+    "note": "Frames are procedurally drawn stand-ins, so this measures the pipeline, not accuracy on real lake photos."
+  }
+}

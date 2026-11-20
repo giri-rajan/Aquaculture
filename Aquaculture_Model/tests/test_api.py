@@ -8,9 +8,8 @@ import json
 from pathlib import Path
 
 import pandas as pd
-from fastapi.testclient import TestClient
-
 from app.main import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)        # importing app.main loads the model bundle
 DATA = pd.read_csv(Path(__file__).resolve().parents[1] / "training/aquaculture_fish_health_dataset.csv",

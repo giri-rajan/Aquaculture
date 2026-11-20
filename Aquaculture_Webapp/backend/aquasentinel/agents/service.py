@@ -16,6 +16,7 @@ import uuid
 
 from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
+from google.adk.tools import google_search
 from google.genai import types
 from pydantic import BaseModel, Field
 
@@ -25,8 +26,20 @@ from . import tools
 logger = logging.getLogger(__name__)
 logging.getLogger("google_adk").setLevel(logging.WARNING)
 
-# ADK's Gemini client reads the key from the environment
-if config.GEMINI_API_KEY:
+# ADK's Gemini client reads its backend from the environment: Vertex AI (service account) or the Gemini API key
+if config.VERTEX_READY and config.VERTEX_API_KEY:
+    # Vertex express mode: the key alone. The SDK refuses a key together with a project, and the project
+    # (still in config for Firestore) is not needed here.
+    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "TRUE"
+    os.environ["GOOGLE_API_KEY"] = config.VERTEX_API_KEY
+    os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
+    os.environ.pop("GOOGLE_CLOUD_LOCATION", None)
+    os.environ.pop("GEMINI_API_KEY", None)        # the AI Studio key stays in config for Gemma and Live
+elif config.VERTEX_READY:
+    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "TRUE"
+    os.environ["GOOGLE_CLOUD_PROJECT"] = config.GOOGLE_CLOUD_PROJECT
+    os.environ["GOOGLE_CLOUD_LOCATION"] = config.GOOGLE_CLOUD_LOCATION
+elif config.GEMINI_API_KEY:
     os.environ["GOOGLE_API_KEY"] = config.GEMINI_API_KEY
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "FALSE"
 
@@ -156,13 +169,46 @@ Zones are named NW (north-west), N, NE, SW, S, SE; name the nearest inlet or out
 State numbers with units. Say plainly when a period or zone has too few readings to support a conclusion.
 The data may come from the built-in simulator; if get_boat_status or the message says so, say the figures are simulated."""
 
+# Grounding with Google Search, for general questions the lake's own data cannot answer (a regulation, what a
+# reading means for fish, good practice). Google Search must be the only tool on its agent, so the Reporter reaches
+# it through search_the_web below; it never sees or changes the survey data.
+web_researcher = LlmAgent(
+    name="web_researcher", model=MODEL, tools=[google_search],
+    description="Looks up general facts on the web with Google Search: Indian water-quality rules (CPCB, BIS), "
+                "fish-farming practice, and what a water parameter means for fish. Not for this lake's data.",
+    instruction="""Answer the question with Google Search, in at most 80 words, for a water-quality officer or fish farmer in India.
+Prefer official and scientific sources (CPCB, state pollution control boards, BIS, ICAR, FAO, universities).
+If the search does not settle the question, say so. Never state facts about a particular lake's readings.""")
+
+
+async def search_the_web(question: str) -> dict:
+    """Looks up general facts with Google Search: Indian water-quality rules (CPCB, BIS), fish-farming practice,
+    and what a water parameter means for fish. Not for this lake's own readings.
+
+    Args:
+        question: the general question, in English.
+
+    Returns a short answer and the web sources Google Search grounded it on, or an error when search is unavailable.
+    """
+    if not config.GROUNDING:
+        return {"error": "Web search is turned off on this server."}
+    try:
+        res = await run_agent(web_researcher, question)
+    except Exception as e:              # no grounding quota, or the search failed: answer from the lake data alone
+        logger.warning("Grounded search failed: %s", str(e)[:120])
+        return {"error": "Web search is not available right now; answer from the lake data only and say so."}
+    return {"answer": res["text"], "sources": res["sources"][:4]}
+
 ask_the_lake = LlmAgent(
-    name="reporter_ask_the_lake", model=MODEL, tools=tools.REPORTER_TOOLS,
+    name="reporter_ask_the_lake", model=MODEL, tools=[*tools.REPORTER_TOOLS, search_the_web],
     description="Answers officials' questions about the water body from live and stored data.",
     instruction=_REPORTER_BASE + """
 Answer the question in at most 120 words, in plain language, leading with the answer.
 Use compare_periods for "got worse / improved" questions, get_parameter_stats for levels, get_hotspots and list_diagnoses
-for causes, get_zone_health for risk to fish. Use Markdown sparingly: a short list or one small table only when it helps.""")
+for causes, get_zone_health for risk to fish. Use Markdown sparingly: a short list or one small table only when it helps.
+For general knowledge this lake's data cannot give (a regulation or limit not in cpcb_criteria, what a level means for fish,
+good farming practice), call search_the_web. Keep its facts apart from the lake's measurements, say they come from the web,
+and end with a 'Sources:' line listing its sources as Markdown links [title](url). Use only the sources it returned.""")
 
 report_writer = LlmAgent(
     name="reporter_survey_report", model=MODEL, tools=tools.REPORTER_TOOLS,
@@ -198,6 +244,9 @@ farmer_guide = LlmAgent(
     instruction="""You write for a small fish farmer in India who keeps fish in, or draws water from, one zone of a lake.
 They read this on a phone and may have it read aloud. You are given the fish-health model's status for their zone
 (Healthy, Stressed or Critical), the model's own advice, and, when there is one, the latest pollution finding there.
+`boat_measured` is what the boat itself measured there in the last hour: oxygen (very_low, low, ok, very_high) and nitrate
+(raised or usual compared with the rest of the lake). The model cannot see oxygen, so when oxygen is low or very_low, say the
+water is short of oxygen and put running the aerators first, even if the model's status is Healthy.
 Write three things:
 - status_line: one short sentence that says whether the water is safe for the fish right now.
 - what_happened: one or two short sentences on what was found and where, or that nothing unusual was found.
@@ -231,6 +280,7 @@ async def run_agent(agent: LlmAgent, text: str, image: bytes | None = None, sess
     if media:
         parts.append(types.Part.from_bytes(data=media[0], mime_type=media[1]))
     calls: list[dict] = []
+    sources: list[dict] = []
     final = ""
 
     async def consume():
@@ -246,6 +296,10 @@ async def run_agent(agent: LlmAgent, text: str, image: bytes | None = None, sess
                     if c["name"] == fr.name and "result" not in c:
                         c["result"] = _preview(fr.response)
                         break
+            gm = getattr(event, "grounding_metadata", None)
+            for ch in (gm.grounding_chunks or []) if gm else []:
+                if ch.web and ch.web.uri and all(x["url"] != ch.web.uri for x in sources):
+                    sources.append({"title": ch.web.title or ch.web.domain or "source", "url": ch.web.uri})
             if event.is_final_response() and event.content and event.content.parts:
                 final = "".join(p.text for p in event.content.parts if p.text and not getattr(p, "thought", False))
 
@@ -261,7 +315,7 @@ async def run_agent(agent: LlmAgent, text: str, image: bytes | None = None, sess
                 raise
             logger.warning("Gemini busy (%s); retry %d in %d s", str(e)[:80], attempt + 1, wait)
             await asyncio.sleep(wait)
-    return {"text": final.strip(), "tool_calls": calls}
+    return {"text": final.strip(), "tool_calls": calls, "sources": sources}
 
 
 def _preview(obj, limit: int = 400) -> str:
@@ -334,7 +388,8 @@ async def diagnose(anomaly: dict, jpeg: bytes | None, simulated_frame: bool = Fa
         "visual_findings": visual or f"No usable camera frame ({visual_error or 'none captured'})",
         "note": ("The camera frame is a simulated stand-in generated by the demo simulator." if simulated_frame and visual else None),
     }
-    res = await run_agent(diagnostician, "Diagnose this anomaly.\n" + json.dumps(msg, default=str, ensure_ascii=False) + _in_language(language, structured=True))
+    res = await run_agent(diagnostician, "Diagnose this anomaly.\n" + json.dumps(msg, default=str, ensure_ascii=False)
+                          + _in_language(language, structured=True))
     try:
         body = parse_json(res["text"])
     except ValueError:
@@ -380,7 +435,7 @@ async def farmer_brief(facts: dict, language: str = "en") -> dict:
     """Plain-language brief for the farmer view. `facts` comes from Hub.farmer_facts(). The result is kept
     until the zone's status, its anomaly or its diagnosis changes, so opening the page does not cost a call each time."""
     key = (facts["zone"], facts.get("health_status"), (facts.get("anomaly") or {}).get("id"),
-           (facts.get("diagnosis") or {}).get("id"), language)
+           (facts.get("diagnosis") or {}).get("id"), (facts.get("boat_measured") or {}).get("oxygen"), language)
     if key in _farmer_cache:
         return _farmer_cache[key]
     res = await run_agent(farmer_guide, "Write the brief for this zone.\n" + json.dumps(facts, default=str, ensure_ascii=False)
@@ -415,4 +470,4 @@ async def self_test() -> dict:
     """One tiny call to confirm the key and model work."""
     probe = LlmAgent(name="probe", model=MODEL, instruction="Reply with the single word: ready")
     res = await run_agent(probe, "Are you there?")
-    return {"ok": True, "model": MODEL, "reply": res["text"][:80]}
+    return {"ok": True, "model": MODEL, "backend": config.GEMINI_BACKEND, "reply": res["text"][:80]}

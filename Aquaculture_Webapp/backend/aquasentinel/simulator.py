@@ -14,9 +14,9 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable
 from zoneinfo import ZoneInfo
 
 import numpy as np

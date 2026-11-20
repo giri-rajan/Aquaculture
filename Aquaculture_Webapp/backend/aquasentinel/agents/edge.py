@@ -19,8 +19,9 @@ from .. import config, cpcb
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_S = 25
-SLOW_TIMEOUT_S = 100
+# A first alert is only useful if it is first: past this budget the fixed rule writes it instead
+TIMEOUT_S = 10
+SLOW_TIMEOUT_S = 20
 LANGUAGE_NAMES = {"en": "English", "ta": "Tamil, in Tamil script", "hi": "Hindi, in Devanagari script"}
 _client = None
 
@@ -93,17 +94,31 @@ async def quick_alert(anomaly: dict, zone_health: dict | None, language: str = "
     global _client
     if _client is None:
         from google import genai
-        _client = genai.Client(api_key=config.GEMINI_API_KEY)
+        _client = genai.Client(api_key=config.GEMINI_API_KEY, vertexai=False)
     f = _facts(anomaly, zone_health)
     prompt = _prompt(f, language)
     try:
         # A first alert has to be quick, so the model is asked not to deliberate (about 2 s instead of a minute)
         from google.genai import types
         fast = types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_level="MINIMAL"))
-        res = await asyncio.wait_for(_client.aio.models.generate_content(model=config.GEMMA_MODEL, contents=prompt, config=fast), TIMEOUT_S)
-    except asyncio.TimeoutError:
+
+        async def ask_fast():
+            # One quick retry on a 503: Gemma's "high demand" spikes usually pass within a second or two
+            for attempt in (1, 2):
+                try:
+                    return await _client.aio.models.generate_content(model=config.GEMMA_MODEL, contents=prompt, config=fast)
+                except Exception as e:
+                    if attempt == 2 or "503" not in str(e):
+                        raise
+                    await asyncio.sleep(1.5)
+        res = await asyncio.wait_for(ask_fast(), TIMEOUT_S)
+    except TimeoutError:
         raise
-    except Exception as e:                         # this model does not take the setting: ask plainly and wait longer
+    except Exception as e:
+        # Only a rejected request (400) means this model does not take the setting; ask plainly then.
+        # Overload (503), quota (429) and the rest go straight to the rule: retrying would make the alert late.
+        if "400" not in str(e) and "INVALID_ARGUMENT" not in str(e):
+            raise
         logger.info("Gemma fast mode unavailable (%s); retrying without it", str(e)[:100])
         res = await asyncio.wait_for(_client.aio.models.generate_content(model=config.GEMMA_MODEL, contents=prompt), SLOW_TIMEOUT_S)
     title, body = _parse(res.text or "")

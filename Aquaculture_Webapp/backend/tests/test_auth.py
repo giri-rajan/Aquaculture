@@ -1,9 +1,8 @@
 import pytest
-from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
-
 from aquasentinel import config
 from aquasentinel.main import app
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 
 @pytest.fixture

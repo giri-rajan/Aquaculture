@@ -111,7 +111,7 @@ class Lake:
 
     def pull_inside(self, x: float, y: float, margin: float = 15.0) -> tuple[float, float]:
         """Move a point (e.g. an inlet on the shoreline) toward the lake centre until it is navigable."""
-        for i in range(200):
+        for _ in range(200):
             if self.navigable(x, y, margin):
                 break
             d = math.hypot(x, y) or 1.0

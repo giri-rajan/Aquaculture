@@ -7,22 +7,23 @@ The out-of-fold probabilities are saved to training/_oof_probs.npy for further a
 (e.g. choosing CRITICAL_WEIGHT).
 """
 import logging
-import sys, time, json
+import sys
+import time
 from pathlib import Path
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
-import lightgbm as lgb
 import xgboost as xgb
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import balanced_accuracy_score, f1_score, precision_score, recall_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import f1_score, balanced_accuracy_score, recall_score, precision_score
 from sklearn.utils.class_weight import compute_sample_weight
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app.features import build_features, feature_columns, SENSORS  # noqa: E402
+from app.features import build_features, feature_columns  # noqa: E402
 from app.logging_config import setup_logging  # noqa: E402
 
 setup_logging()
@@ -48,7 +49,7 @@ def seq_matrix(frame, steps=72, stride=6):
     """Raw 6 h sequence (every 30 min) for the MLP: the network learns its own features."""
     cols = ["temperature", "tds", "turbidity", "ph"]
     parts = []
-    for pid, g in frame.groupby("pond_id", sort=False):
+    for _pid, g in frame.groupby("pond_id", sort=False):
         x = g[cols].ffill().bfill()                # the network cannot handle NaN
         # 12 lagged copies (now, 30 min ago, ... 5.5 h ago) of each sensor = the "sequence"
         lags = [x.shift(k).add_suffix(f"_l{k}") for k in range(0, steps, stride)]

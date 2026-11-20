@@ -41,7 +41,7 @@ Speak {language} unless the person speaks to you in another language; then answe
 
 
 def _config(language: str, simulated: bool) -> types.LiveConnectConfig:
-    client = genai.Client(api_key=config.GEMINI_API_KEY)
+    client = genai.Client(api_key=config.GEMINI_API_KEY, vertexai=False)
     decls = [types.FunctionDeclaration.from_callable(client=client, callable=f) for f in tools.REPORTER_TOOLS]
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
@@ -75,7 +75,7 @@ async def run_session(ws, language: str, simulated: bool) -> None:
         return
     _active += 1
     try:
-        client = genai.Client(api_key=config.GEMINI_API_KEY)
+        client = genai.Client(api_key=config.GEMINI_API_KEY, vertexai=False)
         async with client.aio.live.connect(model=config.GEMINI_LIVE_MODEL, config=_config(language, simulated)) as session:
             await ws.send_json({"type": "ready", "model": config.GEMINI_LIVE_MODEL})
 

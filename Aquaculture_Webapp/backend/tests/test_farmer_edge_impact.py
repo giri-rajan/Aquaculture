@@ -3,10 +3,9 @@ import asyncio
 import time
 
 import pytest
-from fastapi.testclient import TestClient
-
 from aquasentinel import main
 from aquasentinel.agents import edge
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="module")
@@ -68,3 +67,53 @@ def test_edge_alert_column_survives_reset(client):
     aid = _anomaly(hub)
     hub.store.update("anomalies", aid, edge_alert={"by": "rule", "title": "t"})
     assert hub.store.get("anomalies", aid)["edge_alert"]["by"] == "rule"
+
+
+def test_reset_drops_a_first_alert_written_for_the_old_run(client, monkeypatch):
+    """SQLite reuses ids after a reset: an alert still being written must not land on the new anomaly with the same id."""
+    hub = main.hub
+    aid = _anomaly(hub)
+
+    async def slow_alert(row, zone, language):
+        hub.generation += 1                         # what hub.reset() does while the model is still writing
+        return edge.rule_alert(row, zone)
+
+    monkeypatch.setattr(edge, "quick_alert", slow_alert)
+    asyncio.run(hub._first_alert(aid))
+    assert hub.store.get("anomalies", aid).get("edge_alert") is None
+
+
+def test_farmer_facts_add_the_oxygen_the_model_cannot_see(client):
+    hub = main.hub
+    now = time.time()
+    for i in range(5):
+        hub.store.add_reading({"ts": now - i, "lat": 11.0, "lon": 77.0, "zone": "NE", "ph": 7.5, "do": 2.4, "temp": 29,
+                               "ec": 400, "nitrate": 3, "turbidity": 10, "source": "test"})
+    m = hub.farmer_facts("NE")["boat_measured"]
+    assert m["oxygen"] == "very_low" and m["oxygen_mg_l"] == 2.4 and m["readings"] >= 5
+    assert client.get("/api/farmer", params={"zone": "NE"}).json()["measured"]["oxygen"] == "very_low"
+
+
+def test_an_overloaded_gemma_falls_back_to_the_rule_at_once(client, monkeypatch):
+    """A 503 from Gemma gets one quick retry, not a 100 s wait: then the rule writes the alert."""
+    from aquasentinel import config
+
+    calls = []
+
+    class Models:
+        async def generate_content(self, **kw):
+            calls.append(kw)
+            raise RuntimeError("503 UNAVAILABLE. high demand")
+
+    class Client:
+        class aio:
+            models = Models()
+
+    monkeypatch.setattr(config, "GEMMA_READY", True)
+    monkeypatch.setattr(edge, "_client", Client())
+    hub = main.hub
+    aid = _anomaly(hub)
+    t0 = time.time()
+    asyncio.run(hub._first_alert(aid))
+    alert = hub.store.get("anomalies", aid)["edge_alert"]
+    assert alert["by"] == "rule" and len(calls) == 2 and time.time() - t0 < 4     # one quick retry, then the rule

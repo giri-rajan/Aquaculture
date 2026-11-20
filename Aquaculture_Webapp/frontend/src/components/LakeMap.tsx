@@ -68,7 +68,18 @@ export function LakeMap({ live, param, dark, showTruth, domain }: Props) {
   const meta = { ...live.config.params[param], label: t(`param.${param}`) }
   const remaining = mission && boat && mission.status === 'active' ? mission.waypoints.slice(Math.max(0, boat.waypoint_index)) : []
 
+  // Screen readers get the map's state as text; the canvas itself carries no meaning for them
+  const summary = [
+    boat ? t('map.sumBoat', { z: boat.zone, mode: tm(`mode.${boat.mode}`, boat.mode) }) : null,
+    ...anomalies.filter((a) => a.status === 'open').slice(0, 3).map((a) => t('map.sumAnom', { id: a.id, z: a.zone })),
+    ...anomalies.filter((a) => a.source_info?.place).slice(0, 3).map((a) => t('map.sumSrc', { id: a.id, p: a.source_info!.place })),
+    anomalies.some((a) => a.status === 'open') ? null : t('map.sumNone'),
+    ...lake.zones.filter((z) => zones.zones[z.id]?.available).map((z) => t('map.sumZone', { z: z.id, s: tm(`health.${zones.zones[z.id].health_status}`, zones.zones[z.id].health_status) })),
+  ].filter(Boolean).join(' ')
+
   return (
+    <div className="h-full w-full" role="region" aria-label={t('map.aria')}>
+    <p className="sr-only">{summary}</p>
     <MapContainer center={lake.centre} zoom={16} zoomSnap={0.25} attributionControl={!lake.demo} className="h-full w-full" scrollWheelZoom dragging={!COARSE}>
       <Fit outline={lake.outline} />
       {!lake.demo && <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />}
@@ -116,6 +127,7 @@ export function LakeMap({ live, param, dark, showTruth, domain }: Props) {
         </Marker>
       )}
     </MapContainer>
+    </div>
   )
 }
 

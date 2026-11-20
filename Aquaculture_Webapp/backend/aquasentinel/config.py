@@ -15,7 +15,18 @@ load_dotenv(PROJECT_DIR / ".env")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
-GEMINI_READY = bool(GEMINI_API_KEY and GEMINI_MODEL)
+# Vertex AI: on Google Cloud the ADK agents can run on Vertex with the service account instead of an API key.
+# Needs GOOGLE_CLOUD_PROJECT (and GOOGLE_CLOUD_LOCATION, default us-central1). Gemma and Live keep using the API key.
+USE_VERTEX = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("1", "true", "yes")
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+GOOGLE_CLOUD_LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1").strip()
+# A Vertex AI API key ("express mode", starts with AQ.) instead of the service account. Billed to that key's project.
+VERTEX_API_KEY = os.getenv("VERTEX_API_KEY", "").strip()
+VERTEX_READY = USE_VERTEX and bool(VERTEX_API_KEY or GOOGLE_CLOUD_PROJECT)
+GEMINI_READY = bool((GEMINI_API_KEY or VERTEX_READY) and GEMINI_MODEL)
+GEMINI_BACKEND = "vertex" if VERTEX_READY else "gemini_api"
+# Grounding with Google Search for general questions in Ask the Lake. Needs search quota on the key (paid tier).
+GROUNDING = os.getenv("GROUNDING", "true").strip().lower() not in ("0", "false", "no")
 # Optional second and third models on the same key. Empty = that feature is off.
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "").strip()               # small model that writes the first alert
 GEMMA_READY = bool(GEMINI_API_KEY and GEMMA_MODEL)
@@ -35,6 +46,10 @@ _model_dir = Path(os.getenv("MODEL_DIR", "../Aquaculture_Model"))
 MODEL_DIR = _model_dir if _model_dir.is_absolute() else (PROJECT_DIR / _model_dir).resolve()
 
 DB_PATH = Path(os.getenv("DB_PATH", DATA_DIR / "aquasentinel.db"))
+# Optional Google Cloud persistence (cloud.py): findings in Firestore, frames and PDFs in Cloud Storage
+FIRESTORE_ENABLED = os.getenv("FIRESTORE_ENABLED", "").strip().lower() in ("1", "true", "yes")
+FIRESTORE_DATABASE = os.getenv("FIRESTORE_DATABASE", "(default)").strip()
+GCS_BUCKET = os.getenv("GCS_BUCKET", "").strip()
 LAKE_FILE = Path(os.getenv("LAKE_FILE", DATA_DIR / "lake.geojson"))
 POND_TZ = os.getenv("POND_TIMEZONE", "Asia/Kolkata")
 

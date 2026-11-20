@@ -7,6 +7,7 @@ import { useI18n } from '../i18n'
 import { useLive } from '../store'
 import { edgeText, zoneName } from '../text'
 
+interface Measured { oxygen: 'very_low' | 'low' | 'ok' | 'very_high'; oxygen_mg_l: number; nitrate: 'raised' | 'usual' | null }
 interface Brief { status_line: string; what_happened: string; do_now: string[]; model: string; language: string }
 const ORDER = ['Healthy', 'Stressed', 'Critical']
 const ICON = { Healthy: Check, Stressed: AlertTriangle, Critical: OctagonAlert } as const
@@ -34,6 +35,7 @@ export function Farmer() {
   const { t, tm, ago, lang, speech } = useI18n()
   const [sel, setSel] = useState<string | null>(null)
   const [brief, setBrief] = useState<Brief | null>(null)
+  const [measured, setMeasured] = useState<Measured | null>(null)
   const [loading, setLoading] = useState(false)
   const [speakingAloud, setSpeakingAloud] = useState(false)
   const [voiceErr, setVoiceErr] = useState<string | null>(null)
@@ -52,11 +54,12 @@ export function Farmer() {
 
   useEffect(() => {
     setBrief(null)
-    if (!zone || !ready || !p?.available) return
+    setMeasured(null)
+    if (!zone || !p?.available) return
     let stale = false
-    setLoading(true)
-    api<{ brief: Brief | null }>(`/farmer?zone=${zone}&lang=${lang}`)
-      .then((r) => { if (!stale) setBrief(r.brief) })
+    setLoading(ready)
+    api<{ brief: Brief | null; measured: Measured | null }>(`/farmer?zone=${zone}&lang=${lang}`)
+      .then((r) => { if (!stale) { setBrief(r.brief); setMeasured(r.measured) } })
       .catch(() => { /* the page falls back to the model's own advice */ })
       .finally(() => { if (!stale) setLoading(false) })
     return () => { stale = true }
@@ -108,6 +111,14 @@ export function Farmer() {
         </div>
         {loading && !brief ? <div className="mt-4 space-y-2"><Skeleton className="h-5 w-11/12" /><Skeleton className="h-5 w-2/3" /></div>
           : <p className="mt-4 mb-0 text-lg sm:text-xl leading-snug">{statusLine}</p>}
+        {measured && (
+          <p className="mt-3 mb-0 text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="chip" style={{ borderColor: measured.oxygen === 'ok' ? undefined : 'var(--critical)' }}>
+              {t('far.oxy', { lvl: t(`far.oxy.${measured.oxygen}`), v: measured.oxygen_mg_l })}
+            </span>
+            {measured.nitrate === 'raised' && <span className="chip" style={{ borderColor: 'var(--warning)' }}>{t('far.nitRaised')}</span>}
+          </p>
+        )}
         <p className="mt-3 mb-0 text-xs text-muted">
           {status && p ? t('far.sure', { n: Math.round(p.confidence * 100) }) : ''}{status ? ' · ' : ''}{t('far.updated', { ago: ago(live.zones.updated) })}
         </p>

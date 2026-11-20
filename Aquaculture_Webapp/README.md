@@ -23,7 +23,12 @@ Without a key the dashboard still runs: simulator, map, charts, anomaly detectio
 zone health and table-only PDF reports. The agent features say that Gemini is not configured;
 nothing is faked in their place.
 
-Tests: `cd backend && .venv/bin/python -m pytest -q`
+Tests: `cd backend && .venv/bin/python -m pytest -q`. Lint: `uvx ruff check .` from the workspace root.
+CI (`.github/workflows/ci.yml`) runs both test suites, ruff, and the dashboard's lint, type-check and build on every push.
+
+Recorded benchmarks: with the app running, `cd backend && .venv/bin/python scripts/run_benchmarks.py` plays the four
+pollution scenarios and saves `backend/data/benchmarks/latest.json` (and `.md`). The Benchmarks page shows it as the
+last recorded run. It resets the demo's data.
 
 ## Languages, voice and screen sizes
 
@@ -56,6 +61,8 @@ The Tamil and Hindi interface text was machine-written. Have a native speaker re
 | `backend/aquasentinel/zone_health.py` | Calls the fish-health model in `../Aquaculture_Model` |
 | `backend/aquasentinel/agents/` | ADK agents (`service.py`) and their tools (`tools.py`) |
 | `backend/aquasentinel/reports.py` | PDF report |
+| `backend/aquasentinel/cloud.py` | Optional Firestore + Cloud Storage persistence (findings, frames, PDFs) |
+| `backend/scripts/run_benchmarks.py` | Records a benchmark run against the simulator's hidden truth |
 | `backend/data/lake.geojson` | Lake outline, inlets, outfalls, dock (demo outline; replace with a real one) |
 | `backend/data/cpcb_criteria.json` | CPCB Designated Best Use classes used for grounding |
 | `frontend/src/` | React dashboard (Vite, TypeScript, Tailwind, Leaflet) |
@@ -144,7 +151,16 @@ process memory and on local disk. Firebase Hosting can serve `frontend/dist` ins
 `VITE_BACKEND_URL=<Cloud Run URL>` and with `ALLOWED_ORIGINS` set on the backend; Hosting rewrites
 do not carry WebSockets, so the dashboard connects to Cloud Run directly.
 
-Not built yet from the deck's architecture: Pub/Sub, BigQuery, Firestore, Firebase Auth, and
+`deploy.sh` turns on Firestore and a Cloud Storage bucket: findings (anomalies, diagnoses, missions, reports,
+alerts) are copied to Firestore and restored when a new container starts, and camera frames and PDFs go to the
+bucket. Raw readings and the simulator's live state still start fresh. `VERTEX=1 ./deploy.sh ...` runs the ADK agents
+on Vertex AI with the service account.
+
+Ask the Lake can ground general questions (regulations, fish care) with Google Search through a separate
+`web_researcher` agent, with the source links Google returns. It needs Search quota on the key; without it the
+answer comes from the lake data alone and says so. `GROUNDING=false` turns it off.
+
+Not built yet from the deck's architecture: Pub/Sub, BigQuery, Firebase Auth, and
 sending alerts by FCM or SMS. There are no user accounts: one shared password (`APP_PASSWORD`) guards a public deployment, and
 `run.sh` binds to localhost because the gate is off when no password is set.
 

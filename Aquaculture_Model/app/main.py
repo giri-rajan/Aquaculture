@@ -34,8 +34,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
+from .explain import advice_for, describe_feature
 from .features import MIN_HISTORY_STEPS, SENSORS, build_features
-from .explain import describe_feature, advice_for
 from .logging_config import setup_logging
 
 setup_logging()

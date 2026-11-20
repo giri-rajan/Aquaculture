@@ -23,3 +23,6 @@ Aquaculture_Webapp/backend/data/reports/
 .DS_Store
 .vscode/
 .idea/
+
+# Local browser-automation output
+.playwright-mcp/
