@@ -116,4 +116,33 @@ def test_an_overloaded_gemma_falls_back_to_the_rule_at_once(client, monkeypatch)
     t0 = time.time()
     asyncio.run(hub._first_alert(aid))
     alert = hub.store.get("anomalies", aid)["edge_alert"]
-    assert alert["by"] == "rule" and len(calls) == 2 and time.time() - t0 < 4     # one quick retry, then the rule
+    # every hedged request gets one quick retry, then the rule writes the alert
+    assert alert["by"] == "rule" and len(calls) == 2 * edge.HEDGE and time.time() - t0 < 4
+
+
+def test_hedged_gemma_uses_the_first_good_answer(client, monkeypatch):
+    """Three requests go out at once; a slow one must not hold up the alert once a fast one has answered."""
+    from aquasentinel import config
+
+    class Reply:
+        text = "TITLE: Water change in SW\nBODY: pH rose in zone SW. Keep aerators ready; the boat is tracing the source."
+
+    n = {"i": 0}
+
+    class Models:
+        async def generate_content(self, **kw):
+            n["i"] += 1
+            await asyncio.sleep(0.1 if n["i"] == 2 else 30)        # only the second request is fast
+            return Reply()
+
+    class Client:
+        class aio:
+            models = Models()
+
+    monkeypatch.setattr(config, "GEMMA_READY", True)
+    monkeypatch.setattr(edge, "_client", Client())
+    aid = _anomaly(main.hub)
+    t0 = time.time()
+    asyncio.run(main.hub._first_alert(aid))
+    alert = main.hub.store.get("anomalies", aid)["edge_alert"]
+    assert alert["by"] == "gemma" and alert["title"] == "Water change in SW" and time.time() - t0 < 2

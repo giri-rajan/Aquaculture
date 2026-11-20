@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # A first alert is only useful if it is first: past this budget the fixed rule writes it instead
 TIMEOUT_S = 10
 SLOW_TIMEOUT_S = 20
+HEDGE = 3                # identical first-alert requests sent at once; the first good answer is used
 LANGUAGE_NAMES = {"en": "English", "ta": "Tamil, in Tamil script", "hi": "Hindi, in Devanagari script"}
 _client = None
 
@@ -102,7 +103,7 @@ async def quick_alert(anomaly: dict, zone_health: dict | None, language: str = "
         from google.genai import types
         fast = types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_level="MINIMAL"))
 
-        async def ask_fast():
+        async def one():
             # One quick retry on a 503: Gemma's "high demand" spikes usually pass within a second or two
             for attempt in (1, 2):
                 try:
@@ -111,7 +112,26 @@ async def quick_alert(anomaly: dict, zone_health: dict | None, language: str = "
                     if attempt == 2 or "503" not in str(e):
                         raise
                     await asyncio.sleep(1.5)
-        res = await asyncio.wait_for(ask_fast(), TIMEOUT_S)
+
+        async def hedged():
+            # Request hedging: the hosted Gemma answers in ~2 s or ~20 s depending on capacity, so a few identical
+            # tiny requests go out at once and the first good answer wins. The others are cancelled.
+            tasks = [asyncio.create_task(one()) for _ in range(HEDGE)]
+            errors = []
+            try:
+                for done in asyncio.as_completed(tasks):
+                    try:
+                        r = await done
+                    except Exception as e:
+                        errors.append(e)
+                        continue
+                    if (r.text or "").strip():
+                        return r
+                raise errors[0] if errors else RuntimeError("Gemma returned no text")
+            finally:
+                for t in tasks:
+                    t.cancel()
+        res = await asyncio.wait_for(hedged(), TIMEOUT_S)
     except TimeoutError:
         raise
     except Exception as e:
