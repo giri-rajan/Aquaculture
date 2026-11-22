@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build AquaSentinel on Cloud Build and deploy it to Cloud Run (one instance; password-protected if APP_PASSWORD is set).
+# Here, Build AquaSentinel on Cloud Build and deploy it to Cloud Run (one instance; password-protected if APP_PASSWORD is set).
 #
 #   ./deploy.sh <gcp-project-id> [region]
 #
